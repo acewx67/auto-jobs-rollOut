@@ -195,8 +195,11 @@ class LatexResumeGenerator:
             # Parse resume sections
             sections = self._parse_resume_sections(resume_text)
             
+            # Extract name from resume text (usually first line)
+            name = self._extract_name_from_text(resume_text)
+            
             # Generate heading
-            heading_latex = self._generate_heading(sections.get('contact', ''))
+            heading_latex = self._generate_heading(name, sections.get('contact', []))
             
             # Generate sections
             sections_latex = self._generate_sections(sections)
@@ -211,6 +214,30 @@ class LatexResumeGenerator:
             
         except Exception as e:
             raise LatexGeneratorError(f"Failed to generate LaTeX: {str(e)}")
+    
+    def _extract_name_from_text(self, text: str) -> str:
+        """
+        Extract person's name from resume text (usually first line).
+        
+        Args:
+            text (str): Resume text
+            
+        Returns:
+            str: Extracted name or 'Your Name' if not found
+        """
+        lines = [l.strip() for l in text.split('\n') if l.strip()]
+        
+        # First meaningful line is usually the name
+        for line in lines[:5]:  # Check first 5 lines
+            # Skip section headers and short lines
+            if (not line.isupper() and 
+                len(line) < 50 and
+                not any(keyword in line.lower() for keyword in ['skill', 'experience', 'education', 'project'])):
+                # Check if it looks like a name (contains letters, not emails, no special chars)
+                if not any(c in line for c in ['@', '+', '/', '\\']) and len(line.split()) <= 4:
+                    return line
+        
+        return "Your Name"
     
     def _parse_resume_sections(self, text: str) -> Dict[str, List[str]]:
         """
@@ -256,11 +283,12 @@ class LatexResumeGenerator:
         
         return sections
     
-    def _generate_heading(self, contact_info: str) -> str:
+    def _generate_heading(self, name: str, contact_info: str) -> str:
         """
         Generate LaTeX heading section with contact information.
         
         Args:
+            name (str): Person's full name
             contact_info (str or list): Contact information text
             
         Returns:
@@ -270,11 +298,9 @@ class LatexResumeGenerator:
         if isinstance(contact_info, list):
             contact_info = ' '.join(contact_info)
         
-        # Extract contact details (name, phone, email, links)
+        # Extract contact details (phone, email, links)
         lines = [l.strip() for l in contact_info.split('\n') if l.strip()]
         
-        # Try to identify name (usually first substantive line)
-        name = "Your Name"
         phone = ""
         email = ""
         linkedin = ""
@@ -287,10 +313,8 @@ class LatexResumeGenerator:
                 linkedin = line
             elif 'github' in line.lower():
                 github = line
-            elif any(c.isdigit() for c in line) and '-' in line:
+            elif any(c.isdigit() for c in line) and ('-' in line or '+' in line):
                 phone = line
-            elif not name or name == "Your Name":
-                name = line
         
         heading = r"\begin{center}" + "\n"
         heading += f"    \\textbf{{\\Huge \\scshape {self._escape_latex(name)}}} \\\\ \\vspace{{1pt}}\n"
@@ -394,6 +418,7 @@ class LatexResumeGenerator:
         latex = "  \\resumeSubHeadingListStart\n"
         
         current_item = []
+        current_subitems = []
         
         for line in content:
             if not line.strip():
@@ -401,24 +426,82 @@ class LatexResumeGenerator:
             
             # Check if line starts with bullet (sub-item)
             if line.strip().startswith('•') or line.strip().startswith('-'):
-                # This is a sub-item
-                if current_item:
-                    # Save previous item
+                # This is a sub-item - add to current subitems
+                sub_content = line.strip()[1:].strip()
+                current_subitems.append(sub_content)
+            else:
+                # Main item line
+                # If we have sub-items, finalize previous item first
+                if current_item and current_subitems:
+                    latex += self._format_list_item_with_subitems(current_item, current_subitems)
+                    current_item = []
+                    current_subitems = []
+                elif current_item and current_subitems:
                     latex += self._format_list_item(current_item)
                     current_item = []
                 
-                # Add sub-item
-                sub_content = line.strip()[1:].strip()
-                latex += f"      \\resumeItem{{{self._escape_latex(sub_content)}}}\n"
-            else:
-                # Main item line
                 current_item.append(line)
         
-        # Process any remaining item
+        # Process any remaining items
         if current_item:
-            latex += self._format_list_item(current_item)
+            if current_subitems:
+                latex += self._format_list_item_with_subitems(current_item, current_subitems)
+            else:
+                # For items without subitems, wrap content into subitems based on structure
+                latex += self._format_experience_item(current_item)
         
         latex += "  \\resumeSubHeadingListEnd\n"
+        return latex
+    
+    def _format_experience_item(self, item_lines: List[str]) -> str:
+        """
+        Format experience item by parsing structure and adding bullet points.
+        
+        Handles lines that contain company/title info and description lines.
+        """
+        if not item_lines:
+            return ""
+        
+        text = ' '.join([l.strip() for l in item_lines])
+        lines = text.split('  ')
+        
+        # First line usually contains title/company/dates
+        first_line = lines[0] if lines else text
+        
+        latex = ""
+        
+        # If multiple lines exist, treat first as heading and rest as subitems
+        if len(lines) > 1:
+            # Parse first line to extract title, company, location, dates
+            parts = first_line.split(' - ')
+            if len(parts) >= 2:
+                title = parts[0].strip()
+                rest = ' - '.join(parts[1:])
+                latex += f"    \\resumeSubheading{{{self._escape_latex(title)}}}{{}}{{}}{{\\small {self._escape_latex(rest)}}}\n"
+            else:
+                latex += f"    \\resumeItem{{{self._escape_latex(first_line)}}}\n"
+            
+            # Add remaining lines as bullet points
+            for line in lines[1:]:
+                if line.strip():
+                    latex += f"      \\resumeItem{{{self._escape_latex(line.strip())}}}\n"
+        else:
+            # Single line - just add as item
+            latex += f"    \\resumeItem{{{self._escape_latex(text)}}}\n"
+        
+        return latex
+    
+    def _format_list_item_with_subitems(self, main_lines: List[str], subitems: List[str]) -> str:
+        """Format a list item with sub-items"""
+        if not main_lines:
+            return ""
+        
+        content = ' '.join([l.strip() for l in main_lines])
+        latex = f"    \\resumeSubheading{{}}{{}}{{}}{{\\small {self._escape_latex(content)}}}\n"
+        
+        for subitem in subitems:
+            latex += f"      \\resumeItem{{{self._escape_latex(subitem)}}}\n"
+        
         return latex
     
     def _format_list_item(self, item_lines: List[str]) -> str:

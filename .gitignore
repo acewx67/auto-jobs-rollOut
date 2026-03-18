@@ -8,6 +8,14 @@ env/
 venv/
 ENV/
 build/
+
+# LaTeX temporary files
+*.tex
+*.log
+*.aux
+*.out
+*.fls
+*.fdb_latexmk
 develop-eggs/
 dist/
 downloads/
