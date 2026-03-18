@@ -1,0 +1,575 @@
+"""
+LaTeX resume generator module.
+
+Converts tailored resume text into a professionally formatted LaTeX document
+based on the Jake Ryan resume template. Supports PDF compilation if pdflatex
+is available on the system.
+"""
+
+import os
+import re
+import logging
+import subprocess
+from pathlib import Path
+from typing import List, Dict, Optional, Tuple
+
+logger = logging.getLogger(__name__)
+
+
+class LatexGeneratorError(Exception):
+    """Custom exception for LaTeX generation errors"""
+    pass
+
+
+class LatexResumeGenerator:
+    """
+    Converts plain text resume to formatted LaTeX document.
+    
+    Features:
+    - Parses resume sections (education, experience, skills, etc.)
+    - Formats content into LaTeX structure
+    - Generates ATS-friendly, professionally formatted resume
+    - Optionally compiles to PDF using pdflatex
+    """
+    
+    # Resume section patterns for parsing
+    SECTION_PATTERNS = {
+        'contact': r'^(contact|contact information)$',
+        'summary': r'^(summary|professional summary|objective|profile)$',
+        'experience': r'^(experience|work experience|employment|professional experience)$',
+        'education': r'^(education|academic|degrees?)$',
+        'skills': r'^(technical skills|skills|competencies|expertise)$',
+        'projects': r'^(projects|portfolio)$',
+        'certifications': r'^(certifications|licenses?|certificates?|awards?)$',
+    }
+    
+    LATEX_TEMPLATE = r"""%-------------------------
+% Resume in Latex
+% Author : Jake Gutierrez
+% Based off of: https://github.com/sb2nov/resume
+% License : MIT
+%------------------------
+
+\documentclass[letterpaper,11pt]{{article}}
+
+\usepackage{{latexsym}}
+\usepackage[empty]{{fullpage}}
+\usepackage{{titlesec}}
+\usepackage{{marvosym}}
+\usepackage[usenames,dvipsnames]{{color}}
+\usepackage{{verbatim}}
+\usepackage{{enumitem}}
+\usepackage[hidelinks]{{hyperref}}
+\usepackage{{fancyhdr}}
+\usepackage[english]{{babel}}
+\usepackage{{tabularx}}
+\input{{glyphtounicode}}
+
+%----------FONT OPTIONS----------
+% sans-serif
+% \usepackage[sfdefault]{{FiraSans}}
+% \usepackage[sfdefault]{{roboto}}
+% \usepackage[sfdefault]{{noto-sans}}
+% \usepackage[default]{{sourcesanspro}}
+
+% serif
+% \usepackage{{CormorantGaramond}}
+% \usepackage{{charter}}
+
+\pagestyle{{fancy}}
+\fancyhf{{}}
+\fancyfoot{{}}
+\renewcommand{{\headrulewidth}}{{0pt}}
+\renewcommand{{\footrulewidth}}{{0pt}}
+
+% Adjust margins
+\addtolength{{\oddsidemargin}}{{-0.5in}}
+\addtolength{{\evensidemargin}}{{-0.5in}}
+\addtolength{{\textwidth}}{{1in}}
+\addtolength{{\topmargin}}{{-.5in}}
+\addtolength{{\textheight}}{{1.0in}}
+
+\urlstyle{{same}}
+
+\raggedbottom
+\raggedright
+\setlength{{\tabcolsep}}{{0in}}
+
+% Sections formatting
+\titleformat{{\section}}{{
+  \vspace{{-4pt}}\scshape\raggedright\large
+}}{{}}{{0em}}{{}}[\color{{black}}\titlerule \vspace{{-5pt}}]
+
+% Ensure that generate pdf is machine readable/ATS parsable
+\pdfgentounicode=1
+
+%-------------------------
+% Custom commands
+\newcommand{{\resumeItem}}[1]{{
+  \item\small{{
+    {{#1 \vspace{{-2pt}}}}
+  }}
+}}
+
+\newcommand{{\resumeSubheading}}[4]{{
+  \vspace{{-2pt}}\item
+    \begin{{tabular*}}{{0.97\textwidth}}[t]{{l@{{\extracolsep{{\fill}}}}r}}
+      \textbf{{#1}} & #2 \\
+      \textit{{\small#3}} & \textit{{\small #4}} \\
+    \end{{tabular*}}\vspace{{-7pt}}
+}}
+
+\newcommand{{\resumeSubSubheading}}[2]{{
+    \item
+    \begin{{tabular*}}{{0.97\textwidth}}{{l@{{\extracolsep{{\fill}}}}r}}
+      \textit{{\small#1}} & \textit{{\small #2}} \\
+    \end{{tabular*}}\vspace{{-7pt}}
+}}
+
+\newcommand{{\resumeProjectHeading}}[2]{{
+    \item
+    \begin{{tabular*}}{{0.97\textwidth}}{{l@{{\extracolsep{{\fill}}}}r}}
+      \small#1 & #2 \\
+    \end{{tabular*}}\vspace{{-7pt}}
+}}
+
+\newcommand{{\resumeSubItem}}[1]{{\resumeItem{{#1}}\vspace{{-4pt}}}}
+
+\renewcommand{{\labelitemii}}{{$\vcenter{{\hbox{{\tiny$\bullet$}}}}$}}
+
+\newcommand{{\resumeSubHeadingListStart}}{{\begin{{itemize}}[leftmargin=0.15in, label={{}}]}}
+\newcommand{{\resumeSubHeadingListEnd}}{{\end{{itemize}}}}
+\newcommand{{\resumeItemListStart}}{{\begin{{itemize}}}}
+\newcommand{{\resumeItemListEnd}}{{\end{{itemize}}\vspace{{-5pt}}}}
+
+%-------------------------------------------
+%%%%%%  RESUME STARTS HERE  %%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{{document}}
+
+{heading}
+
+{sections}
+
+\end{{document}}
+"""
+    
+    def __init__(self):
+        """Initialize the LaTeX generator"""
+        self.logger = logging.getLogger(__name__)
+        self._check_pdflatex_available()
+    
+    def _check_pdflatex_available(self) -> bool:
+        """Check if pdflatex is available on the system"""
+        try:
+            result = subprocess.run(
+                ['pdflatex', '--version'],
+                capture_output=True,
+                timeout=5
+            )
+            self.pdflatex_available = result.returncode == 0
+            if self.pdflatex_available:
+                self.logger.info("pdflatex found on system")
+            else:
+                self.logger.warning("pdflatex not found; will generate .tex file only")
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            self.pdflatex_available = False
+            self.logger.warning("pdflatex not available on system; will generate .tex file only")
+        
+        return self.pdflatex_available
+    
+    def generate_latex(self, resume_text: str) -> str:
+        """
+        Convert plain text resume to LaTeX.
+        
+        Args:
+            resume_text (str): Plain text resume content
+            
+        Returns:
+            str: LaTeX document code
+            
+        Raises:
+            LatexGeneratorError: If generation fails
+        """
+        try:
+            # Parse resume sections
+            sections = self._parse_resume_sections(resume_text)
+            
+            # Generate heading
+            heading_latex = self._generate_heading(sections.get('contact', ''))
+            
+            # Generate sections
+            sections_latex = self._generate_sections(sections)
+            
+            # Fill template
+            latex_doc = self.LATEX_TEMPLATE.format(
+                heading=heading_latex,
+                sections=sections_latex
+            )
+            
+            return latex_doc
+            
+        except Exception as e:
+            raise LatexGeneratorError(f"Failed to generate LaTeX: {str(e)}")
+    
+    def _parse_resume_sections(self, text: str) -> Dict[str, List[str]]:
+        """
+        Parse resume text into sections.
+        
+        Args:
+            text (str): Resume text
+            
+        Returns:
+            Dict with section names as keys and content as values
+        """
+        sections = {
+            'contact': [],
+            'summary': [],
+            'experience': [],
+            'education': [],
+            'skills': [],
+            'projects': [],
+            'certifications': [],
+        }
+        
+        lines = text.split('\n')
+        current_section = None
+        
+        for line in lines:
+            line_stripped = line.strip()
+            
+            # Skip empty lines
+            if not line_stripped:
+                continue
+            
+            # Check if line is a section header
+            section_found = False
+            for section_key, pattern in self.SECTION_PATTERNS.items():
+                if re.match(pattern, line_stripped.lower()):
+                    current_section = section_key
+                    section_found = True
+                    break
+            
+            # If not a header, add to current section
+            if not section_found and current_section:
+                sections[current_section].append(line_stripped)
+        
+        return sections
+    
+    def _generate_heading(self, contact_info: str) -> str:
+        """
+        Generate LaTeX heading section with contact information.
+        
+        Args:
+            contact_info (str or list): Contact information text
+            
+        Returns:
+            str: LaTeX heading code
+        """
+        # Handle if contact_info is a list
+        if isinstance(contact_info, list):
+            contact_info = ' '.join(contact_info)
+        
+        # Extract contact details (name, phone, email, links)
+        lines = [l.strip() for l in contact_info.split('\n') if l.strip()]
+        
+        # Try to identify name (usually first substantive line)
+        name = "Your Name"
+        phone = ""
+        email = ""
+        linkedin = ""
+        github = ""
+        
+        for line in lines:
+            if '@' in line:
+                email = line
+            elif 'linkedin' in line.lower():
+                linkedin = line
+            elif 'github' in line.lower():
+                github = line
+            elif any(c.isdigit() for c in line) and '-' in line:
+                phone = line
+            elif not name or name == "Your Name":
+                name = line
+        
+        heading = r"\begin{center}" + "\n"
+        heading += f"    \\textbf{{\\Huge \\scshape {self._escape_latex(name)}}} \\\\ \\vspace{{1pt}}\n"
+        
+        # Build contact line
+        contact_parts = []
+        if phone:
+            contact_parts.append(self._escape_latex(phone))
+        if email:
+            email_clean = email.strip('<>')
+            contact_parts.append(f"\\href{{mailto:{email_clean}}}{{\\underline{{{self._escape_latex(email_clean)}}}}}")
+        if linkedin:
+            linkedin_clean = ' '.join(linkedin.split()[1:]) if ' ' in linkedin else linkedin
+            contact_parts.append(f"\\href{{https://linkedin.com/in/{linkedin_clean}}}{{\\underline{{linkedin.com/in/{self._escape_latex(linkedin_clean)}}}}}")
+        if github:
+            github_clean = ' '.join(github.split()[1:]) if ' ' in github else github
+            contact_parts.append(f"\\href{{https://github.com/{github_clean}}}{{\\underline{{github.com/{self._escape_latex(github_clean)}}}}}")
+        
+        if contact_parts:
+            heading += "    \\small " + " $|$ ".join(contact_parts) + "\n"
+        
+        heading += r"\end{center}"
+        
+        return heading
+    
+    def _generate_sections(self, sections: Dict[str, List[str]]) -> str:
+        """
+        Generate LaTeX code for all resume sections.
+        
+        Args:
+            sections (Dict): Parsed resume sections
+            
+        Returns:
+            str: LaTeX sections code
+        """
+        latex_output = ""
+        
+        # Process sections in order of importance
+        section_order = ['summary', 'experience', 'education', 'projects', 'skills', 'certifications']
+        
+        for section_name in section_order:
+            if section_name not in sections or not sections[section_name]:
+                continue
+            
+            section_content = sections[section_name]
+            
+            # Generate section header
+            header_name = section_name.upper()
+            if section_name == 'experience':
+                header_name = "EXPERIENCE"
+            elif section_name == 'education':
+                header_name = "EDUCATION"
+            elif section_name == 'projects':
+                header_name = "PROJECTS"
+            elif section_name == 'skills':
+                header_name = "TECHNICAL SKILLS"
+            
+            latex_output += f"\n%-----------{header_name.upper()}-----------\n"
+            latex_output += f"\\section{{{header_name}}}\n"
+            
+            # Generate section content based on type
+            if section_name == 'skills':
+                latex_output += self._format_skills_section(section_content)
+            elif section_name == 'summary':
+                latex_output += self._format_summary_section(section_content)
+            elif section_name in ['experience', 'education']:
+                latex_output += self._format_list_section(section_content)
+            else:
+                latex_output += self._format_list_section(section_content)
+        
+        return latex_output
+    
+    def _format_skills_section(self, content: List[str]) -> str:
+        """Format technical skills section"""
+        latex = " \\begin{itemize}[leftmargin=0.15in, label={}]\n"
+        latex += "    \\small{\\item{\n"
+        
+        skill_lines = []
+        for line in content:
+            if line.strip():
+                skill_lines.append(self._escape_latex(line))
+        
+        latex += " \\\\ ".join(skill_lines)
+        
+        latex += "\n    }}\n \\end{itemize}\n"
+        return latex
+    
+    def _format_summary_section(self, content: List[str]) -> str:
+        """Format summary/objective section"""
+        latex = "  \\resumeSubHeadingListStart\n"
+        
+        for line in content:
+            if line.strip():
+                latex += f"    \\resumeItem{{{self._escape_latex(line)}}}\n"
+        
+        latex += "  \\resumeSubHeadingListEnd\n"
+        return latex
+    
+    def _format_list_section(self, content: List[str]) -> str:
+        """Format list-based section (experience, education, projects)"""
+        latex = "  \\resumeSubHeadingListStart\n"
+        
+        current_item = []
+        
+        for line in content:
+            if not line.strip():
+                continue
+            
+            # Check if line starts with bullet (sub-item)
+            if line.strip().startswith('•') or line.strip().startswith('-'):
+                # This is a sub-item
+                if current_item:
+                    # Save previous item
+                    latex += self._format_list_item(current_item)
+                    current_item = []
+                
+                # Add sub-item
+                sub_content = line.strip()[1:].strip()
+                latex += f"      \\resumeItem{{{self._escape_latex(sub_content)}}}\n"
+            else:
+                # Main item line
+                current_item.append(line)
+        
+        # Process any remaining item
+        if current_item:
+            latex += self._format_list_item(current_item)
+        
+        latex += "  \\resumeSubHeadingListEnd\n"
+        return latex
+    
+    def _format_list_item(self, item_lines: List[str]) -> str:
+        """Format a single list item"""
+        if not item_lines:
+            return ""
+        
+        # Try to parse structured format (title | company | details | date)
+        content = ' '.join([l.strip() for l in item_lines])
+        
+        # Look for pipe-separated format
+        if '|' in content:
+            parts = [p.strip() for p in content.split('|')]
+            
+            if len(parts) >= 4:
+                title, company, details, date = parts[0], parts[1], parts[2], parts[3]
+                latex = f"    \\resumeSubheading{{{self._escape_latex(title)}}}{{{self._escape_latex(date)}}}{{{self._escape_latex(details)}}}{{{self._escape_latex(company)}}}\n"
+            elif len(parts) >= 3:
+                title, company, date = parts[0], parts[1], parts[2]
+                latex = f"    \\resumeSubheading{{{self._escape_latex(title)}}}{{{self._escape_latex(date)}}}{{{self._escape_latex(company)}}}{{}} \n"
+            else:
+                latex = f"    \\resumeItem{{{self._escape_latex(content)}}}\n"
+        else:
+            latex = f"    \\resumeItem{{{self._escape_latex(content)}}}\n"
+        
+        return latex
+    
+    @staticmethod
+    def _escape_latex(text: str) -> str:
+        """
+        Escape special LaTeX characters in text.
+        
+        Args:
+            text (str): Plain text to escape
+            
+        Returns:
+            str: LaTeX-safe text
+        """
+        # Order matters: escape backslash first
+        replacements = [
+            ('\\', r'\textbackslash{}'),
+            ('&', r'\&'),
+            ('%', r'\%'),
+            ('$', r'\$'),
+            ('#', r'\#'),
+            ('_', r'\_'),
+            ('{', r'\{'),
+            ('}', r'\}'),
+            ('~', r'\textasciitilde{}'),
+            ('^', r'\textasciicircum{}'),
+        ]
+        
+        for old, new in replacements:
+            text = text.replace(old, new)
+        
+        return text
+    
+    def save_to_file(self, latex_content: str, output_path: Path) -> Path:
+        """
+        Save LaTeX content to .tex file.
+        
+        Args:
+            latex_content (str): LaTeX document code
+            output_path (Path): Path to save .tex file
+            
+        Returns:
+            Path: Path to saved .tex file
+        """
+        tex_path = output_path.with_suffix('.tex')
+        tex_path.write_text(latex_content, encoding='utf-8')
+        self.logger.info(f"LaTeX file saved to: {tex_path}")
+        
+        return tex_path
+    
+    def compile_to_pdf(self, tex_path: Path, output_dir: Optional[Path] = None) -> Optional[Path]:
+        """
+        Compile LaTeX to PDF using pdflatex.
+        
+        Args:
+            tex_path (Path): Path to .tex file
+            output_dir (Optional[Path]): Directory for PDF output (default: same as .tex)
+            
+        Returns:
+            Optional[Path]: Path to generated PDF, or None if compilation failed
+        """
+        if not self.pdflatex_available:
+            self.logger.warning("pdflatex not available, skipping PDF compilation")
+            return None
+        
+        if output_dir is None:
+            output_dir = tex_path.parent
+        
+        try:
+            self.logger.info(f"Compiling LaTeX to PDF: {tex_path.name}")
+            
+            # Run pdflatex
+            result = subprocess.run(
+                [
+                    'pdflatex',
+                    '-interaction=nonstopmode',
+                    '-output-directory', str(output_dir),
+                    str(tex_path)
+                ],
+                capture_output=True,
+                timeout=30,
+                text=True
+            )
+            
+            if result.returncode != 0:
+                self.logger.warning(f"pdflatex returned non-zero exit code: {result.returncode}")
+                self.logger.debug(f"pdflatex stderr: {result.stderr}")
+                return None
+            
+            # Find generated PDF
+            pdf_path = output_dir / tex_path.stem.replace('.tex', '') + '.pdf'
+            if not pdf_path.exists():
+                pdf_path = output_dir / (tex_path.stem + '.pdf')
+            
+            if pdf_path.exists():
+                self.logger.info(f"PDF generated successfully: {pdf_path}")
+                
+                # Clean up auxiliary files
+                self._cleanup_latex_artifacts(output_dir, tex_path.stem)
+                
+                return pdf_path
+            else:
+                self.logger.warning(f"PDF file not found after compilation in {output_dir}")
+                return None
+                
+        except subprocess.TimeoutExpired:
+            self.logger.error("pdflatex compilation timed out")
+            return None
+        except Exception as e:
+            self.logger.error(f"Failed to compile LaTeX to PDF: {str(e)}")
+            return None
+    
+    @staticmethod
+    def _cleanup_latex_artifacts(output_dir: Path, stem: str) -> None:
+        """
+        Clean up temporary LaTeX compilation artifacts.
+        
+        Args:
+            output_dir (Path): Directory containing artifacts
+            stem (str): Base filename without extension
+        """
+        artifacts = ['.aux', '.log', '.out', '.fls', '.fdb_latexmk']
+        
+        for artifact in artifacts:
+            artifact_path = output_dir / (stem + artifact)
+            try:
+                if artifact_path.exists():
+                    artifact_path.unlink()
+            except Exception as e:
+                logger.debug(f"Could not remove artifact {artifact_path}: {e}")

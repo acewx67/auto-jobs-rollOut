@@ -376,16 +376,16 @@ Examples:
     tailor_parser = subparsers.add_parser('tailor', help='Tailor resume for a job')
     tailor_parser.add_argument('-r', '--resume', required=True, help='Path to resume file (PDF/DOCX)')
     tailor_parser.add_argument('-j', '--job', required=True, help='Job description file or text')
-    tailor_parser.add_argument('-of', '--output-format', default='txt', choices=['txt', 'json', 'docx'],
-                              help='Output format: txt, json, or docx (default: txt)')
+    tailor_parser.add_argument('-of', '--output-format', default='txt', choices=['txt', 'json', 'docx', 'latex-pdf'],
+                              help='Output format: txt, json, docx, or latex-pdf (default: txt)')
     tailor_parser.set_defaults(func=cmd_tailor)
     
     # Batch command
     batch_parser = subparsers.add_parser('batch', help='Batch tailor resume for multiple jobs')
     batch_parser.add_argument('-r', '--resume', required=True, help='Path to resume file')
     batch_parser.add_argument('-jd', '--jobs-directory', required=True, help='Directory containing job files')
-    batch_parser.add_argument('-of', '--output-format', default='txt', choices=['txt', 'json', 'docx'],
-                             help='Output format: txt, json, or docx (default: txt)')
+    batch_parser.add_argument('-of', '--output-format', default='txt', choices=['txt', 'json', 'docx', 'latex-pdf'],
+                             help='Output format: txt, json, docx, or latex-pdf (default: txt)')
     batch_parser.set_defaults(func=cmd_batch)
     
     # Analyze job command

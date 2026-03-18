@@ -20,6 +20,7 @@ from datetime import datetime
 
 from src.core.resume_parser import ResumeParser, ResumeParseError
 from src.utils.ats_optimizer import ATSOptimizer
+from src.utils.latex_generator import LatexResumeGenerator, LatexGeneratorError
 from src.groq_client.client import GroqClient, GroqClientError
 
 logger = logging.getLogger(__name__)
@@ -246,11 +247,11 @@ class TailorPipeline:
     def _save_output(self, content: str, output_format: str, 
                     source_file: str) -> Path:
         """
-        Save tailored resume to file (txt, json, or docx).
+        Save tailored resume to file (txt, json, docx, or latex-pdf).
         
         Args:
             content (str): Tailored resume text
-            output_format (str): Output format ('txt', 'json', or 'docx')
+            output_format (str): Output format ('txt', 'json', 'docx', or 'latex-pdf')
             source_file (str): Original resume filename (for naming)
             
         Returns:
@@ -270,6 +271,11 @@ class TailorPipeline:
             output_path = self.output_dir / filename
             data = {'tailored_resume': content, 'timestamp': timestamp}
             output_path.write_text(json.dumps(data, indent=2), encoding='utf-8')
+            
+        elif output_format == "latex-pdf":
+            filename = f"{source_name}_tailored_{timestamp}"
+            output_path = self.output_dir / filename
+            self._save_as_latex_pdf(content, output_path)
             
         else:  # Default to txt
             filename = f"{source_name}_tailored_{timestamp}.txt"
@@ -341,6 +347,48 @@ class TailorPipeline:
         
         doc.save(str(output_path))
         self.logger.info(f"DOCX document saved to: {output_path}")
+    
+    def _save_as_latex_pdf(self, content: str, output_path: Path) -> None:
+        """
+        Save resume as LaTeX-formatted PDF.
+        
+        Generates a professionally formatted resume using LaTeX template.
+        If pdflatex is available, compiles to PDF. Otherwise saves as .tex file.
+        
+        Args:
+            content (str): Resume text
+            output_path (Path): Output file path (without extension)
+        """
+        try:
+            generator = LatexResumeGenerator()
+            
+            # Generate LaTeX code
+            latex_code = generator.generate_latex(content)
+            
+            # Save .tex file
+            tex_file = generator.save_to_file(latex_code, output_path)
+            
+            # Attempt to compile to PDF
+            pdf_file = generator.compile_to_pdf(tex_file, output_path.parent)
+            
+            if pdf_file:
+                self.logger.info(f"LaTeX PDF saved to: {pdf_file}")
+            else:
+                self.logger.info(f"LaTeX source saved to: {tex_file}")
+                self.logger.info("PDF compilation skipped or unavailable. Use 'pdflatex' to compile manually.")
+                
+        except LatexGeneratorError as e:
+            self.logger.error(f"Failed to generate LaTeX: {str(e)}")
+            # Fallback: save as text
+            fallback_path = output_path.with_suffix('.txt')
+            fallback_path.write_text(content, encoding='utf-8')
+            self.logger.warning(f"Fallback: saved as text file: {fallback_path}")
+        except Exception as e:
+            self.logger.error(f"Unexpected error generating LaTeX: {str(e)}")
+            # Fallback: save as text
+            fallback_path = output_path.with_suffix('.txt')
+            fallback_path.write_text(content, encoding='utf-8')
+            self.logger.warning(f"Fallback: saved as text file: {fallback_path}")
     
     def batch_tailor(self, resume_path: str, job_files_directory: str,
                     output_format: str = "txt") -> Dict[str, any]:
@@ -417,7 +465,7 @@ class PipelineConfig:
     
     # Pipeline settings
     DEFAULT_OUTPUT_FORMAT = "txt"
-    SUPPORTED_FORMATS = ["txt", "json", "pdf", "docx"]
+    SUPPORTED_FORMATS = ["txt", "json", "pdf", "docx", "latex-pdf"]
     
     @classmethod
     def initialize_directories(cls):
