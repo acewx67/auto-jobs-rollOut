@@ -36,25 +36,49 @@ def print_section(title: str):
 
 
 def print_ats_score(score_dict: dict):
-    """Pretty print ATS score breakdown"""
-    score = score_dict['overall_score']
+    """Pretty print ATS score breakdown - handles both report and full ATS score dicts"""
+    # Handle both report dict (with 'score') and full ATS dict (with 'overall_score')
+    if 'score' in score_dict:
+        score = score_dict['score']
+        breakdown = score_dict.get('breakdown', {})
+        recommendations = score_dict.get('recommendations', [])
+    elif 'overall_score' in score_dict:
+        score = score_dict['overall_score']
+        breakdown = {
+            'keywords': score_dict.get('keyword_score', 0),
+            'format': score_dict.get('format_score', 0),
+            'content': score_dict.get('content_score', 0),
+            'readability': score_dict.get('readability_score', 0),
+        }
+        recommendations = []
+    else:
+        print("❌ Invalid ATS score data")
+        return
+    
     print(f"📊 Overall ATS Score: {score}/100")
     
     if score >= 80:
         rating = "✅ Excellent"
     elif score >= 70:
-        rating = "👍 Good"
-    elif score >= 60:
+        rating = "✓ Good"
+    elif score >= 50:
         rating = "⚠️  Fair"
     else:
         rating = "❌ Low"
     
     print(f"   Rating: {rating}\n")
-    print(f"   Breakdown:")
-    print(f"   - Keywords:    {score_dict['keyword_score']:.1f}/50")
-    print(f"   - Formatting:  {score_dict['format_score']:.1f}/20")
-    print(f"   - Content:     {score_dict['content_score']:.1f}/15")
-    print(f"   - Readability: {score_dict['readability_score']:.1f}/15")
+    
+    if breakdown:
+        print(f"   Breakdown:")
+        print(f"   - Keywords:    {breakdown.get('keywords', 0):.1f}/50")
+        print(f"   - Formatting:  {breakdown.get('format', 0):.1f}/20")
+        print(f"   - Content:     {breakdown.get('content', 0):.1f}/15")
+        print(f"   - Readability: {breakdown.get('readability', 0):.1f}/15")
+    
+    if recommendations:
+        print(f"\n   Recommendations:")
+        for rec in recommendations:
+            print(f"   {rec}")
 
 
 def cmd_tailor(args):
@@ -352,16 +376,16 @@ Examples:
     tailor_parser = subparsers.add_parser('tailor', help='Tailor resume for a job')
     tailor_parser.add_argument('-r', '--resume', required=True, help='Path to resume file (PDF/DOCX)')
     tailor_parser.add_argument('-j', '--job', required=True, help='Job description file or text')
-    tailor_parser.add_argument('-of', '--output-format', default='txt', choices=['txt', 'json'],
-                              help='Output format (default: txt)')
+    tailor_parser.add_argument('-of', '--output-format', default='txt', choices=['txt', 'json', 'docx'],
+                              help='Output format: txt, json, or docx (default: txt)')
     tailor_parser.set_defaults(func=cmd_tailor)
     
     # Batch command
     batch_parser = subparsers.add_parser('batch', help='Batch tailor resume for multiple jobs')
     batch_parser.add_argument('-r', '--resume', required=True, help='Path to resume file')
     batch_parser.add_argument('-jd', '--jobs-directory', required=True, help='Directory containing job files')
-    batch_parser.add_argument('-of', '--output-format', default='txt', choices=['txt', 'json'],
-                             help='Output format (default: txt)')
+    batch_parser.add_argument('-of', '--output-format', default='txt', choices=['txt', 'json', 'docx'],
+                             help='Output format: txt, json, or docx (default: txt)')
     batch_parser.set_defaults(func=cmd_batch)
     
     # Analyze job command

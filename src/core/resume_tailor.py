@@ -246,11 +246,11 @@ class TailorPipeline:
     def _save_output(self, content: str, output_format: str, 
                     source_file: str) -> Path:
         """
-        Save tailored resume to file.
+        Save tailored resume to file (txt, json, or docx).
         
         Args:
             content (str): Tailored resume text
-            output_format (str): Output format
+            output_format (str): Output format ('txt', 'json', or 'docx')
             source_file (str): Original resume filename (for naming)
             
         Returns:
@@ -260,10 +260,14 @@ class TailorPipeline:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         source_name = Path(source_file).stem
         
-        if output_format == "json":
+        if output_format == "docx":
+            filename = f"{source_name}_tailored_{timestamp}.docx"
+            output_path = self.output_dir / filename
+            self._save_as_docx(content, output_path)
+            
+        elif output_format == "json":
             filename = f"{source_name}_tailored_{timestamp}.json"
             output_path = self.output_dir / filename
-            
             data = {'tailored_resume': content, 'timestamp': timestamp}
             output_path.write_text(json.dumps(data, indent=2), encoding='utf-8')
             
@@ -274,6 +278,69 @@ class TailorPipeline:
         
         self.logger.info(f"Saved output to: {output_path}")
         return output_path
+    
+    def _save_as_docx(self, content: str, output_path: Path) -> None:
+        """
+        Save resume content as a DOCX file with professional formatting.
+        
+        Args:
+            content (str): Resume text
+            output_path (Path): Output file path
+        """
+        try:
+            from docx import Document
+            from docx.shared import Pt, RGBColor, Inches
+            from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
+        except ImportError:
+            self.logger.warning("python-docx not installed, saving as TXT instead")
+            output_path.with_suffix('.txt').write_text(content, encoding='utf-8')
+            return
+        
+        doc = Document()
+        
+        # Set margins
+        sections = doc.sections
+        for section in sections:
+            section.top_margin = Inches(0.5)
+            section.bottom_margin = Inches(0.5)
+            section.left_margin = Inches(0.75)
+            section.right_margin = Inches(0.75)
+        
+        # Parse resume into sections
+        lines = content.split('\n')
+        current_section = None
+        
+        for line in lines:
+            line_stripped = line.strip()
+            
+            if not line_stripped:
+                continue
+            
+            # Detect section headers (usually ALL CAPS or followed by dashes)
+            if (line_stripped.isupper() and 
+                len(line_stripped) < 40 and 
+                not line_stripped.startswith('•')):
+                # Add section heading
+                heading = doc.add_heading(line_stripped, level=1)
+                heading_format = heading.paragraph_format
+                heading_format.space_before = Pt(6)
+                heading_format.space_after = Pt(3)
+                current_section = line_stripped
+            
+            elif line_stripped.startswith('•'):
+                # Add bullet point (remove bullet and add as list)
+                text = line_stripped[1:].strip()
+                para = doc.add_paragraph(text, style='List Bullet')
+                para.paragraph_format.space_after = Pt(2)
+            
+            else:
+                # Regular paragraph
+                if line_stripped:
+                    para = doc.add_paragraph(line_stripped)
+                    para.paragraph_format.space_after = Pt(2)
+        
+        doc.save(str(output_path))
+        self.logger.info(f"DOCX document saved to: {output_path}")
     
     def batch_tailor(self, resume_path: str, job_files_directory: str,
                     output_format: str = "txt") -> Dict[str, any]:
