@@ -11,13 +11,13 @@ Uses Flask for easy deployment.
 """
 
 import logging
-import os
 from pathlib import Path
 from typing import Dict, Tuple
 
 from flask import Flask, request, jsonify
 from werkzeug.utils import secure_filename
 
+from src.config import PORT, DEBUG, MAX_FILE_SIZE_BYTES, ALLOWED_RESUME_EXTENSIONS, setup_logging
 from src.core.resume_tailor import TailorPipeline, TailorPipelineError, PipelineConfig
 from src.utils.ats_optimizer import ATSOptimizer
 from src.groq_client.client import GroqClient, GroqClientError
@@ -26,8 +26,8 @@ from src.groq_client.client import GroqClient, GroqClientError
 app = Flask(__name__)
 
 # Configuration
-app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max file size
-ALLOWED_EXTENSIONS = {'pdf', 'docx', 'doc', 'txt', 'md'}
+app.config['MAX_CONTENT_LENGTH'] = MAX_FILE_SIZE_BYTES
+ALLOWED_EXTENSIONS = ALLOWED_RESUME_EXTENSIONS
 UPLOAD_FOLDER = PipelineConfig.INPUT_RESUME_DIR
 
 # Setup logging
@@ -298,12 +298,12 @@ def create_app(config_override=None):
 
 
 if __name__ == '__main__':
+    # Setup logging
+    setup_logging()
+    
     # Initialize directories
     PipelineConfig.initialize_directories()
     
     # Run development server
-    port = os.getenv('PORT', 5000)
-    debug = os.getenv('DEBUG', 'False').lower() == 'true'
-    
-    logger.info(f"Starting Jobs Automaton API on port {port}")
-    app.run(host='0.0.0.0', port=int(port), debug=debug)
+    logger.info(f"Starting Jobs Automaton API on port {PORT}")
+    app.run(host='0.0.0.0', port=PORT, debug=DEBUG)

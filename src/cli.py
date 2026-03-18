@@ -20,18 +20,12 @@ from src.utils.ats_optimizer import ATSOptimizer
 from src.groq_client.client import GroqClient, GroqClientError
 
 
-def setup_logging(verbose: bool = False):
+def setup_logging_cli(verbose: bool = False):
     """Configure logging based on verbosity level"""
-    level = logging.DEBUG if verbose else logging.INFO
+    from src.config import setup_logging as setup_logging_config
     
-    logging.basicConfig(
-        level=level,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.StreamHandler(),
-            logging.FileHandler('logs/tailoring.log')
-        ]
-    )
+    level = 'DEBUG' if verbose else 'INFO'
+    setup_logging_config(level=level)
 
 
 def print_section(title: str):
@@ -384,7 +378,7 @@ Examples:
     args = parser.parse_args()
     
     # Setup logging
-    setup_logging(args.verbose)
+    setup_logging_cli(args.verbose)
     
     # Initialize directories
     PipelineConfig.initialize_directories()

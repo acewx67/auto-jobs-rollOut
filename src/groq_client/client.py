@@ -10,12 +10,13 @@ Uses Groq's openai/gpt-oss-120b model for:
 This module handles all LLM interactions to keep them centralized.
 """
 
-import os
 import json
 import logging
 import time
 from typing import Dict, Optional, List
 from groq import Groq
+
+from src.config import GROQ_API_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +76,7 @@ When tailoring resumes:
         Raises:
             GroqClientError: If API key is not provided or invalid
         """
-        api_key = api_key or os.getenv('GROQ_API_KEY')
+        api_key = api_key or GROQ_API_KEY
         
         if not api_key:
             raise GroqClientError(

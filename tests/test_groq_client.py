@@ -17,8 +17,8 @@ class TestGroqClientInitialization:
     def test_client_requires_api_key(self):
         """Test that client requires API key"""
         with pytest.raises(GroqClientError) as exc_info:
-            # Clear environment variable if it exists
-            with patch.dict('os.environ', {'GROQ_API_KEY': ''}, clear=False):
+            # Mock config to have no API key
+            with patch('src.groq_client.client.GROQ_API_KEY', None):
                 GroqClient(api_key=None)
         assert "API key" in str(exc_info.value)
     
@@ -34,8 +34,8 @@ class TestGroqClientInitialization:
             pass
     
     def test_client_reads_from_environment(self):
-        """Test that client reads from GROQ_API_KEY environment variable"""
-        with patch.dict('os.environ', {'GROQ_API_KEY': 'env-test-key'}, clear=False):
+        """Test that client reads from config GROQ_API_KEY"""
+        with patch('src.groq_client.client.GROQ_API_KEY', 'env-test-key'):
             with patch('src.groq_client.client.Groq'):
                 client = GroqClient()
                 assert client is not None

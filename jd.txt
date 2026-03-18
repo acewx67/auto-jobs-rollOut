@@ -1,0 +1,25 @@
+Job description
+Role & responsibilities
+
+
+Key Responsibilities Develop, test, and maintain Python-based applications and software solutions. Collaborate with other team members to design and implement efficient, scalable, and robust systems. Write clean, maintainable, and well-documented code following industry best practices. Debug and troubleshoot issues to ensure system reliability and performance. Stay updated on emerging Python frameworks and technologies to continuously improve existing processes. Participate in regular team meetings and provide technical insights to ensure projects meet deadlines and quality standards.
+
+
+
+Preferred candidate profile
+
+
+Experience & Qualifications Experience: Minimum of 5 years to a maximum of 8 years of professional experience in Python development. Education: No specific educational qualification required. Relevant experience and skills will be prioritized. Proven expertise in Python programming with a strong portfolio of projects. Excellent problem-solving and analytical skills. Ability to work independently and manage multiple tasks efficiently. Preferred Sector Expertise While no specific sector expertise is required, candidates with experience in industries utilizing Python in data analysis, automation, or software development will be considered favorably. Work Environment Type: Onsite (preferred locations: Bengaluru / Hyderabad). Candidates should be flexible and willing to work from the office
+
+
+
+
+Role: Other
+Industry Type: IT Services & Consulting
+Department: Other
+Employment Type: Full Time, Permanent
+Role Category: Other
+Education
+UG: B.Tech/B.E. - Bachelor of Technology / Engineering in Any Specialization
+Key Skills
+PythonSQL
