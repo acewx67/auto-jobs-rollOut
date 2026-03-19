@@ -112,11 +112,11 @@ class LatexResumeGenerator:
 }}
 
 \newcommand{{\resumeSubheading}}[4]{{
-  \vspace{{-2pt}}\item
+  \vspace{{2pt}}\item
     \begin{{tabular*}}{{0.97\textwidth}}[t]{{l@{{\extracolsep{{\fill}}}}r}}
-      \textbf{{#1}} & #2 \\
-      \textit{{\small#3}} & \textit{{\small #4}} \\
-    \end{{tabular*}}\vspace{{-7pt}}
+      \textbf{{#1}} & \textit{{\small #2}} \\
+      \textit{{\small #3}} & \textit{{\small #4}} \\
+    \end{{tabular*}}\vspace{{-5pt}}
 }}
 
 \newcommand{{\resumeSubSubheading}}[2]{{
@@ -178,7 +178,7 @@ class LatexResumeGenerator:
         
         return self.pdflatex_available
     
-    def generate_pdf(self, resume_text: str, output_path: str, name: str = None) -> str:
+    def generate_pdf(self, resume_text: str, output_path: str, name: str = None, metadata: Dict = None) -> str:
         """
         Generate a PDF resume from tailored text.
         
@@ -196,7 +196,7 @@ class LatexResumeGenerator:
         if not self.pdflatex_available:
             raise LatexGeneratorError("pdflatex is not available. Cannot generate PDF.")
 
-        latex_code = self.generate_latex(resume_text, name=name)
+        latex_code = self.generate_latex(resume_text, name=name, metadata=metadata)
         
         output_dir = Path(output_path).parent
         output_filename = Path(output_path).name
@@ -238,13 +238,14 @@ class LatexResumeGenerator:
             # if tex_file_path.exists():
             #     tex_file_path.unlink()
 
-    def generate_latex(self, resume_text: str, name: str = None) -> str:
+    def generate_latex(self, resume_text: str, name: str = None, metadata: Dict = None) -> str:
         """
         Convert plain text resume to LaTeX.
         
         Args:
             resume_text (str): Plain text resume content (may contain markdown bold **text**)
-            name (str, optional): Candidate name to use for the heading. If None, it will be extracted from resume_text.
+            name (str, optional): Candidate name to use for the heading.
+            metadata (Dict, optional): Structured metadata (email, phone, linkedin, github)
             
         Returns:
             str: LaTeX document code
@@ -263,11 +264,17 @@ class LatexResumeGenerator:
                 # Extract name from resume text (usually first line)
                 name_to_use = self._extract_name_from_text(resume_text)
             
-            # Extract contact info from initial lines (before first section header)
-            # If not found in sections, look in first few lines
-            contact_info = sections.get('contact', [])
+            # Use metadata for contact info if provided, otherwise extract from text
+            contact_info = []
+            if metadata:
+                for field in ['phone', 'email', 'linkedin', 'github']:
+                    if metadata.get(field):
+                        contact_info.append(metadata[field])
+            
             if not contact_info:
-                contact_info = self._extract_contact_from_header(resume_text)
+                contact_info = sections.get('contact', [])
+                if not contact_info:
+                    contact_info = self._extract_contact_from_header(resume_text)
             
             # Generate heading
             heading_latex = self._generate_heading(name_to_use, contact_info)
@@ -507,36 +514,35 @@ class LatexResumeGenerator:
             
             section_content = sections[section_name]
             
-            # If after normalization it's still empty, skip
+            # If after normalization it's still empty, skip entirely
             if not any(item.strip() for item in section_content):
                 continue
             
-            # Convert markdown bold to LaTeX bold in section content
-            section_content = [self._convert_markdown_bold_to_latex(item) for item in section_content]
+            # Map internal section name to display header
+            header_map = {
+                'summary': "SUMMARY",
+                'experience': "EXPERIENCE",
+                'education': "EDUCATION",
+                'projects': "PROJECTS",
+                'skills': "TECHNICAL SKILLS",
+                'certifications': "CERTIFICATIONS"
+            }
+            header_name = header_map.get(section_name, section_name.upper())
             
-            # Generate section header
-            header_name = section_name.upper()
-            if section_name == 'experience':
-                header_name = "EXPERIENCE"
-            elif section_name == 'education':
-                header_name = "EDUCATION"
-            elif section_name == 'projects':
-                header_name = "PROJECTS"
-            elif section_name == 'skills':
-                header_name = "TECHNICAL SKILLS"
-            
-            latex_output += f"\n%-----------{header_name.upper()}-----------\n"
-            latex_output += f"\\section{{{header_name}}}\n"
-            
-            # Generate section content based on type
+            # Create section content
+            section_latex = ""
             if section_name == 'skills':
-                latex_output += self._format_skills_section(section_content)
+                section_latex = self._format_skills_section(section_content)
             elif section_name == 'summary':
-                latex_output += self._format_summary_section(section_content)
-            elif section_name in ['experience', 'education']:
-                latex_output += self._format_list_section(section_content)
+                section_latex = self._format_summary_section(section_content)
             else:
-                latex_output += self._format_list_section(section_content)
+                section_latex = self._format_list_section(section_content)
+            
+            # ONLY add the section if it has content (prevents empty environment error)
+            if section_latex.strip():
+                latex_output += f"\n%-----------{header_name}-----------\n"
+                latex_output += f"\\section{{{header_name}}}\n"
+                latex_output += section_latex
         
         return latex_output
     
@@ -599,6 +605,7 @@ class LatexResumeGenerator:
                 current_item.append(line)
         
         # Process any remaining items
+        # Process any remaining items
         if current_item:
             if current_subitems:
                 latex += self._format_list_item_with_subitems(current_item, current_subitems)
@@ -606,6 +613,10 @@ class LatexResumeGenerator:
                 # For items without subitems, wrap content into subitems based on structure
                 latex += self._format_experience_item(current_item)
         
+        # Add spacing between entries if there are multiple entries
+        if latex and not latex.endswith("\\vspace{5pt}\n"):
+            latex += "  \\vspace{5pt}\n"
+            
         latex += "  \\resumeSubHeadingListEnd\n"
         return latex
     
