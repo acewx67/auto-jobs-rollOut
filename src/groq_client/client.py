@@ -228,6 +228,53 @@ Keep the resume truthful and defensible. Return ONLY valid JSON."""
             self.logger.debug(f"Response (last 500 chars): {response[-500:]}")
             raise GroqClientError(f"Invalid JSON response from API: {str(e)}")
     
+    def parse_resume(self, resume_text: str) -> Dict[str, any]:
+        """
+        Extract structured information from raw resume text using AI.
+        
+        Args:
+            resume_text (str): Raw extracted text from PDF/DOCX
+            
+        Returns:
+            Dict containing:
+                - 'name': Candidate's full name
+                - 'email': Primary email address
+                - 'phone': Primary phone number
+                - 'linkedin': LinkedIn profile URL or handle
+                - 'github': GitHub profile URL or handle
+                - 'sections': Dict of identified sections (summary, experience, education, projects, skills)
+                
+        Raises:
+            GroqClientError: If API call fails or JSON is invalid
+        """
+        prompt = f"""Extract structured information from this resume text.
+        
+Resume Text:
+{resume_text}
+
+Provide a JSON response with these exact keys:
+- name: Full name (be precise, usually at the very top)
+- email: Primary email
+- phone: Best contact number
+- linkedin: LinkedIn URL/handle
+- github: GitHub URL/handle
+- sections: A dictionary where keys are section names (summary, experience, education, projects, skills) and values are the full content of those sections (preserve bullet points and formatting).
+
+IMPORTANT:
+1. If a piece of information is missing, use an empty string ""
+2. For the 'sections', capture the full text of each section precisely.
+3. Return ONLY valid JSON, no additional text."""
+
+        response = self._call_api(prompt, temperature=0.2, max_tokens=3000)
+        
+        try:
+            result = json.loads(response)
+            self.logger.info("Successfully parsed resume structure with AI")
+            return result
+        except json.JSONDecodeError as e:
+            self.logger.error(f"Failed to parse AI resume parsing response: {e}")
+            raise GroqClientError(f"Invalid JSON response from AI parser: {str(e)}")
+
     def generate_professional_summary(self, resume_text: str, job_description: str) -> str:
         """
         Generate an optimized professional summary for a specific job.
