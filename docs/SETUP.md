@@ -44,7 +44,9 @@ pip install -r requirements.txt
 - `python-docx` - DOCX parsing
 - `python-dotenv` - Environment variable management
 - `requests` - HTTP client
-- `flask` - REST API framework
+- `python-multipart` - Middleware for form/file processing
+- `fastapi` - High-performance web framework
+- `uvicorn` - ASGI server for FastAPI
 - `pytest` - Testing framework
 - `black`, `flake8` - Code quality tools
 
@@ -112,13 +114,24 @@ print(f"ATS Score: {result['original_ats_score']} → {result['final_ats_score']
 print(f"Tailored resume saved to: {result['output_file']}")
 ```
 
-### Option C: Using REST API
+### Option C: Using Web Interface (Recommended)
+
+1. Start the FastAPI server:
+   ```bash
+   python -m uvicorn src.api:app --host 0.0.0.0 --port 5000
+   ```
+
+2. Open your browser and navigate to:
+   [http://localhost:5000](http://localhost:5000)
+
+3. Upload your resume, paste the job description, and get your tailored resume!
+
+### Option D: Using REST API via cURL
 
 ```bash
-# Start API server
-python -m src.api
+# Start API server (as shown above)
 
-# In another terminal, test endpoint
+# Test ATS score endpoint
 curl -X POST http://localhost:5000/api/ats-score \
   -H "Content-Type: application/json" \
   -d '{
@@ -269,7 +282,9 @@ RUN pip install -r requirements.txt
 COPY . .
 ENV GROQ_API_KEY=$GROQ_API_KEY
 
-CMD ["python", "-m", "src.api"]
+EXPOSE 5000
+
+CMD ["python", "-m", "uvicorn", "src.api:app", "--host", "0.0.0.0", "--port", "5000"]
 ```
 
 Build and run:
@@ -292,7 +307,7 @@ Type=simple
 User=www-data
 WorkingDirectory=/opt/jobs-automaton
 Environment="GROQ_API_KEY=your_key_here"
-ExecStart=/usr/bin/python3 -m src.api
+ExecStart=/opt/jobs-automaton/venv/bin/python -m uvicorn src.api:app --host 0.0.0.0 --port 5000
 Restart=always
 
 [Install]

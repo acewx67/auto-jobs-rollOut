@@ -25,6 +25,7 @@ POST /api/tailor          - Tailor resume
 POST /api/ats-score       - Calculate ATS score  
 POST /api/analyze-job     - Analyze job description
 GET  /api/status          - Service status
+GET  /api/download/{file} - Download generated PDF
 GET  /health              - Health check
 ```
 
@@ -320,7 +321,7 @@ curl http://localhost:5000/health
 {
   "status": "healthy",
   "service": "jobs-automaton-api",
-  "version": "0.1.0"
+  "version": "0.2.0"
 }
 ```
 
@@ -339,21 +340,14 @@ curl http://localhost:5000/api/status
 ```json
 {
   "service": "jobs-automaton",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "status": "operational",
   "capabilities": [
     "Resume tailoring",
     "ATS scoring",
     "Job analysis",
-    "Batch processing"
-  ],
-  "endpoints": {
-    "/health": "Health check",
-    "/api/tailor": "Tailor resume (POST)",
-    "/api/ats-score": "Calculate ATS score (POST)",
-    "/api/analyze-job": "Analyze job description (POST)",
-    "/api/status": "API status"
-  }
+    "LaTeX PDF generation"
+  ]
 }
 ```
 
@@ -371,9 +365,9 @@ curl -X POST http://localhost:5000/api/tailor \
 ```
 
 **Parameters:**
-- `resume` (file, required): Resume file (.pdf, .docx)
+- `resume` (file, required): Resume file (.pdf, .docx, .txt)
 - `job_description` (text, required): Job description
-- `output_format` (text, optional): "txt" or "json" (default: "txt")
+- `output_format` (text, optional): "txt", "json", or "latex-pdf" (default: "txt")
 
 **Response:**
 ```json
@@ -383,27 +377,18 @@ curl -X POST http://localhost:5000/api/tailor \
   "final_ats_score": 78,
   "ats_improvement": 23,
   "ats_improvement_percentage": 41.8,
-  "key_changes": [
-    "Reordered experience to highlight backend focus",
-    "Integrated AWS and Docker terminology",
-    "Added quantified achievement metrics"
-  ],
-  "matched_keywords": ["Python", "AWS", "Docker", "Backend"],
-  "missing_keywords": ["Kubernetes", "CI/CD"],
-  "metrics_preserved": ["5+ years", "$500M", "40% improvement"],
-  "output_file": "/path/to/tailored_resume.txt",
+  "key_changes": [ ... ],
+  "matched_keywords": [ ... ],
+  "missing_keywords": [ ... ],
+  "metrics_preserved": [ ... ],
+  "output_file": "/path/to/tailored_resume.pdf",
+  "download_url": "/api/download/resume_tailored_20260318_215130.pdf",
   "processing_time_seconds": 12.3,
-  "report": {
-    "score": 78,
-    "breakdown": {
-      "keywords": 40.0,
-      "format": 18.0,
-      "content": 12.0,
-      "readability": 8.0
-    }
-  }
+  "report": { ... }
 }
 ```
+
+**Note:** If `output_format` is `latex-pdf`, the `download_url` will point to the generated PDF file.
 
 **Error Response:**
 ```json
@@ -412,6 +397,20 @@ curl -X POST http://localhost:5000/api/tailor \
   "error": "Resume file is required"
 }
 ```
+
+---
+
+### Endpoint: `GET /api/download/{filename}`
+
+Download a generated file (PDF, TXT, or JSON).
+
+**Request:**
+```bash
+curl http://localhost:5000/api/download/resume_tailored_20260318_215130.pdf
+```
+
+**Response:**
+Standard file download stream.
 
 ---
 

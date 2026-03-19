@@ -225,15 +225,21 @@ class TailorPipeline:
     
     def _load_job_description(self, job_input: str) -> str:
         """Load job description from string or file."""
-        job_path = Path(job_input)
-        if job_path.exists() and job_path.is_file():
-            content = job_path.read_text(encoding='utf-8')
-            if not content.strip():
-                raise TailorPipelineError("Job description file is empty")
-            return content
-        
         if not job_input or not job_input.strip():
             raise TailorPipelineError("Job description is empty")
+            
+        # If it's short and looks like a path (no newlines), check if it's a file
+        if '\n' not in job_input and len(job_input) < 255:
+            try:
+                job_path = Path(job_input)
+                if job_path.exists() and job_path.is_file():
+                    content = job_path.read_text(encoding='utf-8')
+                    if not content.strip():
+                        raise TailorPipelineError("Job description file is empty")
+                    return content
+            except OSError:
+                # If path check fails (e.g. invalid chars), treat as raw text
+                pass
         
         return job_input
     
@@ -280,9 +286,14 @@ class TailorPipeline:
             for _ in range(2):
                 subprocess.run(
                     ['pdflatex', '-interaction=nonstopmode', '-output-directory', str(output_dir), str(tex_file_path)],
-                    check=True, capture_output=True, timeout=120
+                    check=False, capture_output=True, timeout=120
                 )
-            return str(pdf_file_path)
+            
+            if pdf_file_path.exists():
+                return str(pdf_file_path)
+            
+            self.logger.error("pdflatex finished but no PDF was created")
+            return ""
         except Exception as e:
             self.logger.error(f"Direct PDF compilation failed: {e}")
             return ""

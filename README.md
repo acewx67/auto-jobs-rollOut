@@ -10,6 +10,7 @@ A powerful AI-driven automation pipeline for resume tailoring and intelligent jo
 - **Groq-Powered Tailoring**: LLM-based resume customization for specific job descriptions
 - **High ATS Scores**: Maintains formatting, keywords, and metrics for maximum compatibility
 - **Detailed Optimization Reports**: Get insights on what was changed and why
+- **Premium Web Interface**: A sleek, dark-themed UI for easy resume tailoring and LaTeX PDF generation.
 
 ### Feature 2: Auto Fetch & Apply (Planned)
 - Automatic job posting fetching from multiple job boards
@@ -35,7 +36,12 @@ pip install -r requirements.txt
 # Configure Groq API
 cp .env.example .env
 # Edit .env and add your GROQ_API_KEY
+
+# Start the Web Interface
+python -m uvicorn src.api:app --host 0.0.0.0 --port 5000
 ```
+
+Now open [http://localhost:5000](http://localhost:5000) in your browser.
 
 ## Usage
 
@@ -44,6 +50,13 @@ cp .env.example .env
 ```bash
 python src/cli.py --resume path/to/resume.pdf --job job_description.txt --output tailored_resume.pdf
 ```
+
+### Web Interface: Tailor via Browser
+
+1. Run the FastAPI server: `python -m uvicorn src.api:app --port 5000`
+2. Open `http://localhost:5000`
+3. Upload your resume and paste the job description.
+4. Click "Tailor My Resume" and download your professionally formatted LaTeX PDF.
 
 ### Programmatic Usage
 
@@ -70,7 +83,8 @@ print(f"ATS Score: {result['ats_score']}")
 - **Groq API** - AI-powered resume analysis and tailoring
 - **pypdf** - PDF processing
 - **python-docx** - DOCX processing
-- **Flask** - REST API (optional)
+- **FastAPI / Uvicorn** - High-performance REST API and Web Server
+- **Vanilla CSS / JS** - Premium, responsive web interface
 
 ## License
 

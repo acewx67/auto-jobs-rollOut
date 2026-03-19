@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Resume Tailor - ATS Optimizer</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="background-blobs">
+        <div class="blob blob-1"></div>
+        <div class="blob blob-2"></div>
+        <div class="blob blob-3"></div>
+    </div>
+
+    <main class="container">
+        <header class="header">
+            <h1 class="title">Resume <span class="accent">Tailor</span></h1>
+            <p class="subtitle">Optimize your resume for any job description with AI-powered tailoring and ATS scoring.</p>
+        </header>
+
+        <section class="card-grid">
+            <div class="card glass">
+                <div class="card-header">
+                    <div class="icon">📄</div>
+                    <h2>Your Resume</h2>
+                </div>
+                <div class="card-body">
+                    <div class="upload-area" id="drop-zone">
+                        <input type="file" id="resume-upload" hidden accept=".pdf,.docx,.txt">
+                        <div class="upload-content">
+                            <span class="upload-icon">↑</span>
+                            <p>Drag & drop or <span class="browse">browse</span></p>
+                            <span class="file-name" id="file-name">No file selected</span>
+                        </div>
+                    </div>
+                    <div class="divider"><span>OR</span></div>
+                    <textarea id="resume-text" placeholder="Paste your resume text here..."></textarea>
+                </div>
+            </div>
+
+            <div class="card glass">
+                <div class="card-header">
+                    <div class="icon">💼</div>
+                    <h2>Job Description</h2>
+                </div>
+                <div class="card-body">
+                    <textarea id="job-description" placeholder="Paste the job description here..."></textarea>
+                </div>
+            </div>
+        </section>
+
+        <div class="actions">
+            <button id="tailor-btn" class="btn primary">
+                <span class="btn-text">Tailor My Resume</span>
+                <div class="loader" hidden></div>
+            </button>
+        </div>
+
+        <section id="results" class="results-section" hidden>
+            <div class="card glass results-card">
+                <div class="results-header">
+                    <h2>Tailoring Results</h2>
+                    <div class="badge" id="improvement-badge">+0% Improvement</div>
+                </div>
+                
+                <div class="score-grid">
+                    <div class="score-item">
+                        <span class="score-label">Original ATS</span>
+                        <div class="score-value" id="original-score">0</div>
+                    </div>
+                    <div class="score-item">
+                        <span class="score-label">Final ATS</span>
+                        <div class="score-value accent" id="final-score">0</div>
+                    </div>
+                </div>
+
+                <div class="results-content">
+                    <h3>Key Changes</h3>
+                    <ul id="key-changes" class="changes-list"></ul>
+                    
+                    <h3>Download Your Resume</h3>
+                    <div class="download-actions">
+                        <a id="download-link" href="#" class="btn secondary" download>
+                            Download LaTeX PDF
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="footer">
+        <p>Built with ❤️ by Jobs Automaton</p>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>

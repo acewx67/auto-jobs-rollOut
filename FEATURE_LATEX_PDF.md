@@ -50,6 +50,10 @@ The LaTeX generator automatically:
 - Falls back to .tex file if `pdflatex` is not available
 - Cleans up temporary LaTeX compilation artifacts
 
+### 5. Web Integration
+- Seamlessly integrated into the Premium Web Interface
+- Direct download link provided after tailoring process
+
 ## Output Files
 
 When using `latex-pdf` format:
