@@ -228,10 +228,20 @@ class TailorPipeline:
             raise TailorPipelineError(f"Unexpected error: {str(e)}")
     
     def _parse_resume(self, resume_path: str) -> Dict:
-        """Parse resume file and return parsed content"""
-        parsed = self.parser.parse(resume_path)
-        self.logger.debug(f"Parsed resume: {parsed['character_count']} characters")
-        return parsed
+        """Parse resume file and return parsed content (augmented with AI)"""
+        # Step 1.1: Basic text extraction
+        basic_parsed = self.parser.parse(resume_path)
+        
+        # Step 1.2: AI-powered structure extraction
+        self.logger.info("Augmenting parsed resume with AI structure...")
+        ai_parsed = self.groq_client.parse_resume(basic_parsed['normalized_text'])
+        
+        # Merge basic and AI parsing
+        # AI parsing provides: name, email, phone, linkedin, github, sections
+        basic_parsed.update(ai_parsed)
+        
+        self.logger.info(f"AI-Parsed resume for: {basic_parsed.get('name', 'Unknown')}")
+        return basic_parsed
     
     def _load_job_description(self, job_input: str) -> str:
         """
