@@ -178,12 +178,73 @@ class LatexResumeGenerator:
         
         return self.pdflatex_available
     
-    def generate_latex(self, resume_text: str) -> str:
+    def generate_pdf(self, resume_text: str, output_path: str, name: str = None) -> str:
+        """
+        Generate a PDF resume from tailored text.
+        
+        Args:
+            resume_text (str): The tailored resume text
+            output_path (str): Path to save the PDF (without extension)
+            name (str, optional): Candidate name to ensure is correctly populated
+            
+        Returns:
+            str: Path to the generated PDF
+            
+        Raises:
+            LatexGeneratorError: If generation fails
+        """
+        if not self.pdflatex_available:
+            raise LatexGeneratorError("pdflatex is not available. Cannot generate PDF.")
+
+        latex_code = self.generate_latex(resume_text, name=name)
+        
+        output_dir = Path(output_path).parent
+        output_filename = Path(output_path).name
+        
+        tex_file_path = output_dir / f"{output_filename}.tex"
+        pdf_file_path = output_dir / f"{output_filename}.pdf"
+        
+        try:
+            with open(tex_file_path, 'w', encoding='utf-8') as f:
+                f.write(latex_code)
+            
+            # Compile LaTeX to PDF
+            # Run pdflatex twice to ensure all cross-references are resolved
+            for _ in range(2):
+                subprocess.run(
+                    ['pdflatex', '-interaction=nonstopmode', '-output-directory', str(output_dir), str(tex_file_path)],
+                    check=True,
+                    capture_output=True,
+                    timeout=30
+                )
+            
+            self.logger.info(f"PDF generated successfully at {pdf_file_path}")
+            return str(pdf_file_path)
+            
+        except subprocess.CalledProcessError as e:
+            self.logger.error(f"pdflatex compilation failed: {e.stderr.decode()}")
+            raise LatexGeneratorError(f"pdflatex compilation failed: {e.stderr.decode()}")
+        except FileNotFoundError:
+            raise LatexGeneratorError("pdflatex command not found. Is LaTeX installed and in your PATH?")
+        except Exception as e:
+            raise LatexGeneratorError(f"An error occurred during PDF generation: {str(e)}")
+        finally:
+            # Clean up auxiliary files
+            for ext in ['.aux', '.log', '.out', '.fls', '.fdb_latexmk']:
+                temp_file = output_dir / f"{output_filename}{ext}"
+                if temp_file.exists():
+                    temp_file.unlink()
+            # Keep .tex file for debugging if needed
+            # if tex_file_path.exists():
+            #     tex_file_path.unlink()
+
+    def generate_latex(self, resume_text: str, name: str = None) -> str:
         """
         Convert plain text resume to LaTeX.
         
         Args:
             resume_text (str): Plain text resume content (may contain markdown bold **text**)
+            name (str, optional): Candidate name to use for the heading. If None, it will be extracted from resume_text.
             
         Returns:
             str: LaTeX document code
@@ -195,11 +256,21 @@ class LatexResumeGenerator:
             # Parse resume sections FIRST (while still in markdown format)
             sections = self._parse_resume_sections(resume_text)
             
-            # Extract name from resume text (usually first line)
-            name = self._extract_name_from_text(resume_text)
+            # Determine the name to use
+            if name:
+                name_to_use = name
+            else:
+                # Extract name from resume text (usually first line)
+                name_to_use = self._extract_name_from_text(resume_text)
+            
+            # Extract contact info from initial lines (before first section header)
+            # If not found in sections, look in first few lines
+            contact_info = sections.get('contact', [])
+            if not contact_info:
+                contact_info = self._extract_contact_from_header(resume_text)
             
             # Generate heading
-            heading_latex = self._generate_heading(name, sections.get('contact', []))
+            heading_latex = self._generate_heading(name_to_use, contact_info)
             
             # Generate sections
             sections_latex = self._generate_sections(sections)
@@ -241,6 +312,37 @@ class LatexResumeGenerator:
         
         return "Your Name"
     
+    def _extract_contact_from_header(self, text: str) -> str:
+        """
+        Extract contact information from the first few lines of resume.
+        
+        Looks for phone, email, github, linkedin in the initial lines before
+        the first section header.
+        
+        Args:
+            text (str): Resume text
+            
+        Returns:
+            str: Contact information line (may be empty)
+        """
+        lines = [l.strip() for l in text.split('\n') if l.strip()]
+        
+        # Check lines 2-5 for contact info (after name, title, etc.)
+        for line in lines[1:6]:
+            # Look for lines containing contact markers like @ (email), + or - (phone),
+            # or keywords like github, linkedin
+            has_contact_marker = (
+                '@' in line or
+                ('+' in line and any(c.isdigit() for c in line)) or
+                'github' in line.lower() or
+                'linkedin' in line.lower()
+            )
+            
+            if has_contact_marker:
+                return line
+        
+        return ""
+    
     def _parse_resume_sections(self, text: str) -> Dict[str, List[str]]:
         """
         Parse resume text into sections.
@@ -267,13 +369,13 @@ class LatexResumeGenerator:
         for line in lines:
             line_stripped = line.strip()
             
-            # Skip empty lines
-            if not line_stripped:
+            # Skip empty lines and unwanted text
+            if not line_stripped or "resume built with resuminator" in line_stripped.lower():
                 continue
             
-            # Check if line is a section header
-            # First, remove markdown formatting for pattern matching
-            line_for_matching = re.sub(r'\*\*(.*?)\*\*', r'\1', line_stripped)
+            # Check if line is a section header (including markdown headers)
+            # Remove markdown formatting for pattern matching
+            line_for_matching = line_stripped.strip('*').strip('#').strip('-').strip()
             
             section_found = False
             for section_key, pattern in self.SECTION_PATTERNS.items():
@@ -303,43 +405,80 @@ class LatexResumeGenerator:
         if isinstance(contact_info, list):
             contact_info = ' '.join(contact_info)
         
-        # Extract contact details (phone, email, links)
-        lines = [l.strip() for l in contact_info.split('\n') if l.strip()]
-        
         phone = ""
         email = ""
         linkedin = ""
         github = ""
         
-        for line in lines:
-            if '@' in line:
-                email = line
-            elif 'linkedin' in line.lower():
-                linkedin = line
-            elif 'github' in line.lower():
-                github = line
-            elif any(c.isdigit() for c in line) and ('-' in line or '+' in line):
-                phone = line
+        # Split by pipe first (for pipe-separated formats), then by newline
+        contact_parts_raw = []
+        if '|' in contact_info:
+            contact_parts_raw = [p.strip() for p in contact_info.split('|')]
+        else:
+            contact_parts_raw = [l.strip() for l in contact_info.split('\n') if l.strip()]
+        
+        # Parse each part to identify what it is
+        for part in contact_parts_raw:
+            part_lower = part.lower().strip()
+            if not part_lower:
+                continue
+                
+            if '@' in part:
+                # Email address
+                email = part
+            elif 'linkedin' in part_lower or (('/in/' in part_lower or 'linkedin.com' in part_lower) and not github):
+                # LinkedIn - may be "LinkedIn: username" or "linkedin.com/in/username" or just "username"
+                if ':' in part:
+                    linkedin = part.split(':', 1)[1].strip()
+                elif '/in/' in part:
+                    linkedin = part.split('/in/', 1)[1].strip('/').split('?')[0]
+                else:
+                    linkedin = part
+            elif 'github' in part_lower or (('github.com' in part_lower or 'github' in part_lower) and not linkedin):
+                # GitHub - may be "GitHub: username" or "github.com/username" or just "username"
+                if ':' in part:
+                    github = part.split(':', 1)[1].strip()
+                elif 'github.com/' in part:
+                    github = part.split('github.com/', 1)[1].strip('/').split('?')[0]
+                else:
+                    github = part
+            elif any(c.isdigit() for c in part) and ('+' in part or '-' in part or part[0].isdigit()):
+                # Phone number
+                phone = part
+        
+        # Heuristic: swap if they look obviously wrong (e.g. github handle in linkedin)
+        if linkedin and github:
+            github_indicators = ['git', 'repo', 'code', 'commit', 'dev', 'acewx']
+            linkedin_indicators = ['link', 'profile', 'connect', 'in/']
+            
+            # If linkedin handle has github indicators AND github handle DOES NOT
+            if any(k in linkedin.lower() for k in github_indicators):
+                if not any(k in github.lower() for k in github_indicators):
+                    linkedin, github = github, linkedin
+            # Or vice versa
+            elif any(k in github.lower() for k in linkedin_indicators):
+                if not any(k in linkedin.lower() for k in linkedin_indicators):
+                    linkedin, github = github, linkedin
         
         heading = r"\begin{center}" + "\n"
         heading += f"    {{\\Huge \\textbf{{{self._escape_latex(name, preserve_markup=False)}}}}} \\\\ \\vspace{{1pt}}\n"
         
         # Build contact line
-        contact_parts = []
+        contact_display_parts = []
         if phone:
-            contact_parts.append(self._escape_latex(phone, preserve_markup=False))
+            contact_display_parts.append(self._escape_latex(phone, preserve_markup=False))
         if email:
-            email_clean = email.strip('<>')
-            contact_parts.append(f"\\href{{mailto:{email_clean}}}{{\\underline{{{self._escape_latex(email_clean, preserve_markup=False)}}}}}")
+            email_clean = email.strip('<>').strip()
+            contact_display_parts.append(f"\\href{{mailto:{email_clean}}}{{\\underline{{{self._escape_latex(email_clean, preserve_markup=False)}}}}}")
         if linkedin:
-            linkedin_clean = ' '.join(linkedin.split()[1:]) if ' ' in linkedin else linkedin
-            contact_parts.append(f"\\href{{https://linkedin.com/in/{linkedin_clean}}}{{\\underline{{linkedin.com/in/{self._escape_latex(linkedin_clean, preserve_markup=False)}}}}}")
+            linkedin_clean = linkedin.strip()
+            contact_display_parts.append(f"\\href{{https://linkedin.com/in/{linkedin_clean}}}{{\\underline{{linkedin.com/in/{self._escape_latex(linkedin_clean, preserve_markup=False)}}}}}")
         if github:
-            github_clean = ' '.join(github.split()[1:]) if ' ' in github else github
-            contact_parts.append(f"\\href{{https://github.com/{github_clean}}}{{\\underline{{github.com/{self._escape_latex(github_clean, preserve_markup=False)}}}}}")
+            github_clean = github.strip()
+            contact_display_parts.append(f"\\href{{https://github.com/{github_clean}}}{{\\underline{{github.com/{self._escape_latex(github_clean, preserve_markup=False)}}}}}")
         
-        if contact_parts:
-            heading += "    \\small " + " $|$ ".join(contact_parts) + "\n"
+        if contact_display_parts:
+            heading += "    \\small " + " $|$ ".join(contact_display_parts) + "\n"
         
         heading += r"\end{center}"
         
@@ -362,9 +501,15 @@ class LatexResumeGenerator:
         
         for section_name in section_order:
             if section_name not in sections or not sections[section_name]:
+                # Guardrail: Add empty section with a placeholder or skip
+                # For core sections, we might want to avoid empty environments
                 continue
             
             section_content = sections[section_name]
+            
+            # If after normalization it's still empty, skip
+            if not any(item.strip() for item in section_content):
+                continue
             
             # Convert markdown bold to LaTeX bold in section content
             section_content = [self._convert_markdown_bold_to_latex(item) for item in section_content]
@@ -436,7 +581,10 @@ class LatexResumeGenerator:
             if line.strip().startswith('•') or line.strip().startswith('-'):
                 # This is a sub-item - add to current subitems
                 sub_content = line.strip()[1:].strip()
-                current_subitems.append(sub_content)
+                
+                # Filter out placeholder bullets like "--" or empty ones
+                if sub_content and sub_content.strip('-').strip('*').strip():
+                    current_subitems.append(sub_content)
             else:
                 # Main item line
                 # If we have sub-items, finalize previous item first
@@ -505,10 +653,17 @@ class LatexResumeGenerator:
             return ""
         
         content = ' '.join([l.strip() for l in main_lines])
-        latex = f"    \\resumeSubheading{{}}{{}}{{}}{{\\small {self._escape_latex(content, preserve_markup=True)}}}\n"
+        
+        # Try to parse title/rest in content
+        parts = content.split(' - ', 1)
+        if len(parts) == 2:
+            title, rest = parts[0].strip(), parts[1].strip()
+            latex = f"    \\resumeSubheading{{{self._escape_latex(title, preserve_markup=True)}}}{{}}{{}}{{\\small {self._escape_latex(rest, preserve_markup=True)}}}\n"
+        else:
+            latex = f"    \\resumeSubheading{{}}{{}}{{}}{{\\small {self._escape_latex(content, preserve_markup=True)}}}\n"
         
         for subitem in subitems:
-            latex += f"      \\resumeItem{{{self._escape_latex(subitem, preserve_markup=True)}}}\n"
+            latex += f"      \\resumeItem{{{LatexResumeGenerator._escape_latex(subitem, preserve_markup=True)}}}\n"
         
         return latex
     
@@ -538,7 +693,6 @@ class LatexResumeGenerator:
         return latex
     
     @staticmethod
-    @staticmethod
     def _escape_latex(text: str, preserve_markup: bool = True) -> str:
         """
         Escape special LaTeX characters in text while optionally preserving LaTeX markup.
@@ -550,6 +704,8 @@ class LatexResumeGenerator:
         Returns:
             str: LaTeX-safe text with markup preserved
         """
+        if text is None:
+            return ""
         # If preserving markup, temporarily replace LaTeX commands with placeholders
         latex_commands = []
         processed_text = text
@@ -557,11 +713,16 @@ class LatexResumeGenerator:
         if preserve_markup:
             # Find and temporarily replace LaTeX markup like \textbf{...}
             # Pattern: backslash + command name + braced content
-            pattern = r'\\textbf\{[^}]*\}|\\textit\{[^}]*\}|\\texttt\{[^}]*\}|\\textmd\{[^}]*\}|\\textrm\{[^}]*\}|\\underline\{[^}]*\}'
+            pattern = r'\\(textbf|textit|texttt|textmd|textrm|underline)\{([^}]*)\}'
             
             placeholders = []
             def replace_command(match):
-                latex_commands.append(match.group(0))
+                command = match.group(1)
+                inner_text = match.group(2)
+                # Recursively escape the inner text
+                escaped_inner = LatexResumeGenerator._escape_latex(inner_text, preserve_markup=False)
+                full_cmd = f"\\{command}{{{escaped_inner}}}"
+                latex_commands.append(full_cmd)
                 # Use a placeholder with only alphanumeric that won't be escaped
                 placeholder = f"XLATEXCMDX{len(latex_commands)-1}XENDX"
                 placeholders.append(placeholder)

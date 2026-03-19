@@ -65,6 +65,7 @@ class TailorPipeline:
             self.parser = ResumeParser()
             self.optimizer = ATSOptimizer()
             self.groq_client = GroqClient(api_key=groq_api_key)
+            self.generator = LatexResumeGenerator()
             
             self.output_dir = Path(output_dir)
             self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -128,16 +129,53 @@ class TailorPipeline:
             self.logger.info("Step 4/6: Analyzing job description with AI...")
             job_analysis = self.groq_client.analyze_job_description(job_desc)
             
-            # Step 5: Generate AI-tailored resume
+            # Step 5/6: Generating tailored resume with AI...
             self.logger.info("Step 5/6: Generating tailored resume with AI...")
+            
+            # Initial generation
             tailored_response = self.groq_client.generate_tailored_resume(
-                parsed_resume['normalized_text'],
+                parsed_resume['normalized_text'], 
                 job_desc,
                 job_analysis
             )
             
             # Extract tailored resume text
             tailored_text = self._extract_tailored_text(tailored_response)
+            
+            # Essential sections to check
+            essential_sections = ['SUMMARY', 'EXPERIENCE', 'EDUCATION', 'PROJECTS', 'TECHNICAL SKILLS']
+            
+            def get_missing(text):
+                missing = []
+                u_text = text.upper()
+                for s in essential_sections:
+                    if s not in u_text:
+                        missing.append(s)
+                return missing
+            
+            missing_sections = get_missing(tailored_text)
+            
+            # One-time retry if sections are missing
+            if missing_sections:
+                self.logger.warning(f"Tailored resume is missing essential sections: {', '.join(missing_sections)}. Retrying once...")
+                
+                feedback = f"The previous attempt was missing the following essential sections: {', '.join(missing_sections)}. " \
+                           f"Please regenerate the full resume and ensure ALL core sections are included this time."
+                
+                tailored_response = self.groq_client.generate_tailored_resume(
+                    parsed_resume['normalized_text'], 
+                    job_desc,
+                    job_analysis,
+                    retry_feedback=feedback
+                )
+                tailored_text = self._extract_tailored_text(tailored_response)
+                
+                # Check again after retry
+                still_missing = get_missing(tailored_text)
+                if still_missing:
+                    self.logger.error(f"Tailored resume still missing sections after retry: {', '.join(still_missing)}")
+                else:
+                    self.logger.info("Retry successful: all essential sections are now present")
             
             # Apply ATS formatting
             tailored_text = self.optimizer.format_for_ats(tailored_text)
@@ -158,7 +196,7 @@ class TailorPipeline:
             )
             
             # Save output
-            output_file = self._save_output(tailored_text, output_format, resume_path)
+            output_file = self._save_output(tailored_text, parsed_resume, job_desc, output_format, self.output_dir)
             
             # Compile result
             result = {
@@ -244,46 +282,56 @@ class TailorPipeline:
         
         return text.strip()
     
-    def _save_output(self, content: str, output_format: str, 
-                    source_file: str) -> Path:
+    def _save_output(self, content: str, original_data: Dict, job_desc: str, 
+                    output_format: str, result_dir: Path) -> Path:
         """
-        Save tailored resume to file (txt, json, docx, or latex-pdf).
+        Save tailored resume to file in specified format.
         
         Args:
             content (str): Tailored resume text
-            output_format (str): Output format ('txt', 'json', 'docx', or 'latex-pdf')
-            source_file (str): Original resume filename (for naming)
+            original_data (Dict): Original parsed resume data
+            job_desc (str): Job description text
+            output_format (str): Desired output format
+            result_dir (Path): Directory to save results
             
         Returns:
-            Path: Path to saved file
+            Path: Path to the primary output file
         """
-        # Generate output filename
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        source_name = Path(source_file).stem
+        source_name = Path(original_data.get('source_path', 'resume')).stem
         
         if output_format == "docx":
-            filename = f"{source_name}_tailored_{timestamp}.docx"
-            output_path = self.output_dir / filename
+            output_path = result_dir / f"{source_name}_tailored_{timestamp}.docx"
             self._save_as_docx(content, output_path)
+            return output_path
             
         elif output_format == "json":
-            filename = f"{source_name}_tailored_{timestamp}.json"
-            output_path = self.output_dir / filename
-            data = {'tailored_resume': content, 'timestamp': timestamp}
+            output_path = result_dir / f"{source_name}_tailored_{timestamp}.json"
+            data = {
+                'tailored_resume': content, 
+                'timestamp': timestamp,
+                'candidate_name': original_data.get('name')
+            }
             output_path.write_text(json.dumps(data, indent=2), encoding='utf-8')
+            return output_path
+            
+        elif output_format == 'latex':
+            latex_code = self.generator.generate_latex(content, name=original_data.get('name'))
+            output_path = result_dir / f"{source_name}_tailored_{timestamp}.tex"
+            output_path.write_text(latex_code, encoding='utf-8')
+            return output_path
             
         elif output_format == "latex-pdf":
-            filename = f"{source_name}_tailored_{timestamp}"
-            output_path = self.output_dir / filename
-            self._save_as_latex_pdf(content, output_path)
+            output_path_base = result_dir / f"{source_name}_tailored_{timestamp}"
+            pdf_path = self.generator.generate_pdf(content, str(output_path_base), name=original_data.get('name'))
+            if pdf_path:
+                return Path(pdf_path)
+            return output_path_base.with_suffix('.tex')
             
         else:  # Default to txt
-            filename = f"{source_name}_tailored_{timestamp}.txt"
-            output_path = self.output_dir / filename
+            output_path = result_dir / f"{source_name}_tailored_{timestamp}.txt"
             output_path.write_text(content, encoding='utf-8')
-        
-        self.logger.info(f"Saved output to: {output_path}")
-        return output_path
+            return output_path
     
     def _save_as_docx(self, content: str, output_path: Path) -> None:
         """
@@ -348,47 +396,6 @@ class TailorPipeline:
         doc.save(str(output_path))
         self.logger.info(f"DOCX document saved to: {output_path}")
     
-    def _save_as_latex_pdf(self, content: str, output_path: Path) -> None:
-        """
-        Save resume as LaTeX-formatted PDF.
-        
-        Generates a professionally formatted resume using LaTeX template.
-        If pdflatex is available, compiles to PDF. Otherwise saves as .tex file.
-        
-        Args:
-            content (str): Resume text
-            output_path (Path): Output file path (without extension)
-        """
-        try:
-            generator = LatexResumeGenerator()
-            
-            # Generate LaTeX code
-            latex_code = generator.generate_latex(content)
-            
-            # Save .tex file
-            tex_file = generator.save_to_file(latex_code, output_path)
-            
-            # Attempt to compile to PDF
-            pdf_file = generator.compile_to_pdf(tex_file, output_path.parent)
-            
-            if pdf_file:
-                self.logger.info(f"LaTeX PDF saved to: {pdf_file}")
-            else:
-                self.logger.info(f"LaTeX source saved to: {tex_file}")
-                self.logger.info("PDF compilation skipped or unavailable. Use 'pdflatex' to compile manually.")
-                
-        except LatexGeneratorError as e:
-            self.logger.error(f"Failed to generate LaTeX: {str(e)}")
-            # Fallback: save as text
-            fallback_path = output_path.with_suffix('.txt')
-            fallback_path.write_text(content, encoding='utf-8')
-            self.logger.warning(f"Fallback: saved as text file: {fallback_path}")
-        except Exception as e:
-            self.logger.error(f"Unexpected error generating LaTeX: {str(e)}")
-            # Fallback: save as text
-            fallback_path = output_path.with_suffix('.txt')
-            fallback_path.write_text(content, encoding='utf-8')
-            self.logger.warning(f"Fallback: saved as text file: {fallback_path}")
     
     def batch_tailor(self, resume_path: str, job_files_directory: str,
                     output_format: str = "txt") -> Dict[str, any]:

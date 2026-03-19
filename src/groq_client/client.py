@@ -141,7 +141,8 @@ Return ONLY valid JSON, no additional text."""
             raise GroqClientError(f"Invalid JSON response from API: {str(e)}")
     
     def generate_tailored_resume(self, original_resume: str, job_description: str,
-                                parsed_job_analysis: Optional[Dict] = None) -> Dict[str, str]:
+                                parsed_job_analysis: Optional[Dict] = None,
+                                retry_feedback: Optional[str] = None) -> Dict[str, str]:
         """
         Generate a job-specific tailored version of the resume.
         
@@ -151,7 +152,8 @@ Return ONLY valid JSON, no additional text."""
         Args:
             original_resume (str): The original resume text
             job_description (str): The target job description
-            parsed_job_analysis (Dict, optional): Pre-analyzed job requirements
+            parsed_job_analysis (Dict, optional): Pre-analyzed job data
+            retry_feedback (str, optional): Feedback to correct previous attempt
             
         Returns:
             Dict containing:
@@ -167,6 +169,10 @@ Return ONLY valid JSON, no additional text."""
         analysis_str = ""
         if parsed_job_analysis:
             analysis_str = f"\n\nKey job requirements (for reference):\n{json.dumps(parsed_job_analysis, indent=2)}"
+        
+        feedback_str = ""
+        if retry_feedback:
+            feedback_str = f"\n\nIMPORTANT CORRECTION FROM PREVIOUS ATTEMPT:\n{retry_feedback}\nPlease ensure all requested sections are present in this new version."
         
         prompt = f"""Your task is to tailor a resume for a specific job posting.
 
@@ -196,13 +202,25 @@ Produce a JSON response with:
 - key_changes: List of 3-5 specific changes made (descriptions of what was reorganized/reframed)
 - keyword_usage: 5-10 job keywords that are now present in tailored resume
 
+CRITICAL: 
+1. DO NOT add any watermarks or footer text like "Resume built with Resuminator" or similar.
+2. ENSURE all contact information (LinkedIn, GitHub) is correctly mapped and not swapped.
+3. DO NOT add placeholder bullet points like "--" or dummy entries.
+4. YOU MUST INCLUDE ALL OF THE FOLLOWING SECTIONS: **Professional Summary**, **Technical Skills**, **Experience**, **Projects**, and **Education**. DO NOT OMIT ANY OF THESE SECTIONS.
+5. Use standard headers for these sections (e.g., "Projects" not "Recent Projects").
+6. If the original resume has projects, you MUST include a Projects section in the tailored version.
+{feedback_str}
+
 Keep the resume truthful and defensible. Return ONLY valid JSON."""
 
-        response = self._call_api(prompt, temperature=0.7, max_tokens=4096)
+        response = self._call_api(prompt, temperature=0.7 if not retry_feedback else 0.8, max_tokens=4096)
         
         try:
             result = json.loads(response)
-            self.logger.info("Generated tailored resume")
+            if retry_feedback:
+                self.logger.info("Successfully regenerated tailored resume with feedback")
+            else:
+                self.logger.info("Generated tailored resume")
             return result
         except json.JSONDecodeError as e:
             self.logger.error(f"Failed to parse tailored resume response: {e}")
