@@ -177,41 +177,38 @@ Return ONLY valid JSON, no additional text."""
         prompt = f"""Your task is to tailor a resume for a specific job posting.
 
 IMPORTANT RULES:
-1. NEVER fabricate experience or skills - only reframe and reorganize existing ones
+1. NEVER fabricate experience - strictly use the facts provided in the original resume
 2. MAINTAIN FACTUAL ACCURACY - if something isn't in the original, don't add it
 3. Focus on keyword matching and achievement highlighting
-4. Keep the same companies, positions, dates, and achievements
-5. Improve clarity and ATS compatibility
+4. Distinguish between 'Professional Experience' and 'Personal Projects'.
 
-FORMATTING RULES FOR OUTPUT:
-- Use **bold format** (with double asterisks) to emphasize: company names, key technologies, and important achievements
-- Example: **Google** - **Senior Python Engineer**
-- Example: Built using **FastAPI**, **Docker**, and **Kubernetes**
-- This bold formatting will be converted to proper LaTeX formatting automatically
-
-Original Resume:
-{original_resume}
+Original Structured Resume:
+{json.dumps(original_resume, indent=2)}
 
 Target Job Description:
 {job_description}
 {analysis_str}
 
-Produce a JSON response with:
-- tailored_resume: The full tailored resume (preserve all sections, reorder/reframe content, use **bold** for emphasis)
-- summary_section: A new professional summary optimized for this role
-- key_changes: List of 3-5 specific changes made (descriptions of what was reorganized/reframed)
-- keyword_usage: 5-10 job keywords that are now present in tailored resume
+Produce a JSON response with this EXACT structure:
+- name: Candidate name
+- contact: {{email: "", phone: "", location: ""}}
+- socials: {{linkedin: "", github: "", portfolio: ""}}
+- summary: Optimized professional summary (3-4 lines)
+- experience: List of tailored objects (company, role, location, dates, achievements)
+- projects: List of tailored personal project objects (title, tech_stack, description)
+- education: List of education objects (school, degree, location, dates, details)
+- skills: Dictionary of categorized technical skills
+- key_changes: List of specific changes made
 
-CRITICAL: 
-1. DO NOT add any watermarks or footer text like "Resume built with Resuminator" or similar.
-2. ENSURE all contact information (LinkedIn, GitHub) is correctly mapped and not swapped.
-3. DO NOT add placeholder bullet points like "--" or dummy entries.
-4. YOU MUST INCLUDE ALL OF THE FOLLOWING SECTIONS: **Professional Summary**, **Technical Skills**, **Experience**, **Projects**, and **Education**. DO NOT OMIT ANY OF THESE SECTIONS.
-5. Use standard headers for these sections (e.g., "Projects" not "Recent Projects").
-6. If the original resume has projects, you MUST include a Projects section in the tailored version.
-{feedback_str}
+FORMATTING IN CONTENT:
+- Use **bold format** (with double asterisks) within achievements and descriptions for emphasis.
+- Example: "Developed a **Python-based** web scraper using **BeautifulSoup**."
 
-Keep the resume truthful and defensible. Return ONLY valid JSON."""
+CRITICAL:
+1. Preserve all original companies, roles, and dates.
+2. Optimize the 'achievements' in experience and 'description' in projects to match the job description.
+3. Ensure no sections are omitted.
+4. Return ONLY valid JSON, no additional text."""
 
         response = self._call_api(prompt, temperature=0.7 if not retry_feedback else 0.8, max_tokens=4096)
         
