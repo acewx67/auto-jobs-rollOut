@@ -111,57 +111,89 @@ class ResumeParser:
     
     def _parse_pdf(self, file_path: str) -> str:
         """
-        Extract text from a PDF file.
-        
-        Args:
-            file_path (str): Path to PDF file
-            
-        Returns:
-            str: Extracted text from PDF
+        Extract text from a PDF file, including embedded hyperlinks.
         """
         text = []
+        links = []
         try:
             reader = PdfReader(file_path)
             for page_num, page in enumerate(reader.pages):
+                # Extract plain text
                 page_text = page.extract_text()
                 if page_text:
                     text.append(page_text)
-                    self.logger.debug(f"Extracted page {page_num + 1} from PDF")
+                
+                # Extract links from annotations
+                if "/Annots" in page:
+                    for annot in page["/Annots"]:
+                        obj = annot.get_object()
+                        if "/A" in obj and "/URI" in obj["/A"]:
+                            uri = obj["/A"]["/URI"]
+                            links.append(uri)
             
             if not text:
                 raise ResumeParseError("No text found in PDF file")
                 
-            return "\n".join(text)
+            full_text = "\n".join(text)
+            
+            # Append unique links at the end if they aren't already in the text
+            if links:
+                unique_links = list(set(links))
+                link_section = "\n\nEXTRACTED LINKS:\n" + "\n".join(unique_links)
+                full_text += link_section
+                
+            return full_text
             
         except Exception as e:
             raise ResumeParseError(f"PDF parsing failed: {str(e)}")
     
     def _parse_docx(self, file_path: str) -> str:
         """
-        Extract text from a DOCX file.
-        
-        Args:
-            file_path (str): Path to DOCX file
-            
-        Returns:
-            str: Extracted text from DOCX
+        Extract text from a DOCX file, including embedded hyperlinks.
         """
         text = []
         try:
             doc = Document(file_path)
             
+            # Helper to extract text from a paragraph or table cell with hyperlinks
+            from docx.oxml.shared import qn
+            
+            def get_text_with_links(p_element, part):
+                p_text = ""
+                # Iterate through runs and hyperlinks inside the paragraph
+                for child in p_element:
+                    tag = child.tag
+                    if tag.endswith("}r"):
+                        for t in child.xpath(".//*[local-name()='t']"):
+                            p_text += t.text if t.text else ""
+                    elif tag.endswith("}hyperlink"):
+                        r_id = child.get(qn("r:id"))
+                        link_text = "".join(t.text for t in child.xpath(".//*[local-name()='t']") if t.text)
+                        if r_id and r_id in part.rels:
+                            url = part.rels[r_id].target_ref
+                            p_text += f"{link_text} [{url}]"
+                        else:
+                            p_text += link_text
+                return p_text
+
             # Extract text from paragraphs
             for para in doc.paragraphs:
-                if para.text.strip():
-                    text.append(para.text)
+                p_text = get_text_with_links(para._element, para.part)
+                if p_text.strip():
+                    text.append(p_text)
             
             # Extract text from tables
             for table in doc.tables:
                 for row in table.rows:
                     row_text = []
                     for cell in row.cells:
-                        if cell.text.strip():
-                            row_text.append(cell.text.strip())
+                        cell_parts = []
+                        for para in cell.paragraphs:
+                            p_text = get_text_with_links(para._element, doc.part)
+                            if p_text.strip():
+                                cell_parts.append(p_text)
+                        if cell_parts:
+                            row_text.append("\n".join(cell_parts))
                     if row_text:
                         text.append(" | ".join(row_text))
             
