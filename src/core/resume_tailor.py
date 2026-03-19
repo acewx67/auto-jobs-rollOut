@@ -14,8 +14,9 @@ This is the main entry point for resume tailoring operations.
 import os
 import json
 import logging
+import subprocess
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, List
 from datetime import datetime
 
 from src.core.resume_parser import ResumeParser, ResumeParseError
@@ -85,7 +86,6 @@ class TailorPipeline:
             resume_path (str): Path to resume file (PDF or DOCX)
             job_description (str): Job posting text or path to job file
             output_format (str): Output format ("txt", "json", "pdf", "docx")
-                                Currently supports "txt" and "json"
             
         Returns:
             Dict containing:
@@ -120,9 +120,8 @@ class TailorPipeline:
             # Step 3: Calculate initial ATS score
             self.logger.info("Step 3/6: Calculating initial ATS score...")
             initial_ats = self.optimizer.calculate_ats_score(
-                parsed_resume['normalized_text'],
-                job_desc,
-                parsed_resume['sections']
+                self._flatten_structured_resume(parsed_resume),
+                job_desc
             )
             
             # Step 4: Analyze job with Groq
@@ -132,52 +131,33 @@ class TailorPipeline:
             # Step 5/6: Generating tailored resume with AI...
             self.logger.info("Step 5/6: Generating tailored resume with AI...")
             
-            # Initial generation
+            # Initial generation: Pass the structured parsed_resume (name, contact, experience, etc.)
             tailored_response = self.groq_client.generate_tailored_resume(
-                parsed_resume['normalized_text'], 
+                parsed_resume, 
                 job_desc,
                 job_analysis
             )
             
-            # Extract tailored resume text
-            tailored_text = self._extract_tailored_text(tailored_response)
+            # Validation: Ensure core sections are present in the JSON
+            required_keys = ['experience', 'education', 'projects', 'skills', 'summary']
+            missing_keys = [k for k in required_keys if not tailored_response.get(k)]
             
-            # Essential sections to check
-            essential_sections = ['SUMMARY', 'EXPERIENCE', 'EDUCATION', 'PROJECTS', 'TECHNICAL SKILLS']
-            
-            def get_missing(text):
-                missing = []
-                u_text = text.upper()
-                for s in essential_sections:
-                    if s not in u_text:
-                        missing.append(s)
-                return missing
-            
-            missing_sections = get_missing(tailored_text)
-            
-            # One-time retry if sections are missing
-            if missing_sections:
-                self.logger.warning(f"Tailored resume is missing essential sections: {', '.join(missing_sections)}. Retrying once...")
-                
-                feedback = f"The previous attempt was missing the following essential sections: {', '.join(missing_sections)}. " \
-                           f"Please regenerate the full resume and ensure ALL core sections are included this time."
+            if missing_keys:
+                self.logger.warning(f"Tailored JSON is missing essential keys: {', '.join(missing_keys)}. Retrying once...")
+                feedback = f"The previous attempt was missing the following structured sections: {', '.join(missing_keys)}. " \
+                           f"Please return the FULL tailored resume in the requested JSON format."
                 
                 tailored_response = self.groq_client.generate_tailored_resume(
-                    parsed_resume['normalized_text'], 
+                    parsed_resume, 
                     job_desc,
                     job_analysis,
                     retry_feedback=feedback
                 )
-                tailored_text = self._extract_tailored_text(tailored_response)
-                
-                # Check again after retry
-                still_missing = get_missing(tailored_text)
-                if still_missing:
-                    self.logger.error(f"Tailored resume still missing sections after retry: {', '.join(still_missing)}")
-                else:
-                    self.logger.info("Retry successful: all essential sections are now present")
             
-            # Apply ATS formatting
+            # Create a plain text version for ATS scoring
+            tailored_text = self._flatten_structured_resume(tailored_response)
+            
+            # Apply ATS formatting (for the text version used in scoring/report)
             tailored_text = self.optimizer.format_for_ats(tailored_text)
             
             # Step 6: Calculate final ATS score
@@ -196,7 +176,7 @@ class TailorPipeline:
             )
             
             # Save output
-            output_file = self._save_output(tailored_text, parsed_resume, job_desc, output_format, self.output_dir)
+            output_file = self._save_output(tailored_response, parsed_resume, job_desc, output_format, self.output_dir)
             
             # Compile result
             result = {
@@ -228,35 +208,23 @@ class TailorPipeline:
             raise TailorPipelineError(f"Unexpected error: {str(e)}")
     
     def _parse_resume(self, resume_path: str) -> Dict:
-        """Parse resume file and return parsed content (augmented with AI)"""
-        # Step 1.1: Basic text extraction
+        """Parse resume file and return rich AI data structure"""
+        # Step 1.1: Basic text extraction (needed for the AI to read)
         basic_parsed = self.parser.parse(resume_path)
         
-        # Step 1.2: AI-powered structure extraction
-        self.logger.info("Augmenting parsed resume with AI structure...")
-        ai_parsed = self.groq_client.parse_resume(basic_parsed['normalized_text'])
+        # Step 1.2: AI-powered rich structure extraction
+        self.logger.info("Extracting rich resume structure with AI...")
+        ai_parsed = self.groq_client.parse_resume(basic_parsed['raw_text'])
         
-        # Merge basic and AI parsing
-        # AI parsing provides: name, email, phone, linkedin, github, sections
-        basic_parsed.update(ai_parsed)
+        # Ensure we keep the normalized text for the optimizer if needed
+        ai_parsed['normalized_text'] = basic_parsed['normalized_text']
+        ai_parsed['source_path'] = resume_path
         
-        self.logger.info(f"AI-Parsed resume for: {basic_parsed.get('name', 'Unknown')}")
-        return basic_parsed
+        self.logger.info(f"AI-Parsed resume for: {ai_parsed.get('name', 'Unknown')}")
+        return ai_parsed
     
     def _load_job_description(self, job_input: str) -> str:
-        """
-        Load job description from string or file.
-        
-        Args:
-            job_input (str): Job description text or file path
-            
-        Returns:
-            str: Job description content
-            
-        Raises:
-            TailorPipelineError: If file not found or empty
-        """
-        # Check if it's a file path
+        """Load job description from string or file."""
         job_path = Path(job_input)
         if job_path.exists() and job_path.is_file():
             content = job_path.read_text(encoding='utf-8')
@@ -264,208 +232,127 @@ class TailorPipeline:
                 raise TailorPipelineError("Job description file is empty")
             return content
         
-        # Otherwise treat as raw text
         if not job_input or not job_input.strip():
             raise TailorPipelineError("Job description is empty")
         
         return job_input
     
-    def _extract_tailored_text(self, response: Dict) -> str:
-        """
-        Extract tailored resume text from Groq response.
+    def _flatten_structured_resume(self, data: Dict) -> str:
+        """Convert structured resume back to plain text for ATS scoring"""
+        text = [f"{data.get('name', '')}\n"]
         
-        Args:
-            response (Dict): Response from generate_tailored_resume()
+        if data.get('summary'):
+            text.append(f"SUMMARY\n{data['summary']}\n")
             
-        Returns:
-            str: Tailored resume text
+        if data.get('experience'):
+            text.append("EXPERIENCE")
+            for exp in data['experience']:
+                text.append(f"{exp.get('company', '')} - {exp.get('role', '')}")
+                text.append('\n'.join(exp.get('achievements', [])))
+            text.append("")
+                
+        if data.get('projects'):
+            text.append("PROJECTS")
+            for proj in data['projects']:
+                text.append(f"{proj.get('title', '')} ({proj.get('tech_stack', '')})")
+                text.append('\n'.join(proj.get('description', [])))
+            text.append("")
+                
+        if data.get('skills'):
+            text.append("TECHNICAL SKILLS")
+            for cat, items in data['skills'].items():
+                text.append(f"{cat}: {', '.join(items) if isinstance(items, list) else items}")
+            text.append("")
             
-        Raises:
-            TailorPipelineError: If response is invalid
-        """
-        if 'tailored_resume' not in response:
-            raise TailorPipelineError("Invalid response format from AI: missing 'tailored_resume'")
+        return '\n'.join(text)
+
+    def _compile_pdf(self, latex_code: str, output_path: str) -> str:
+        """Helper to compile LaTeX code directly to PDF"""
+        output_dir = Path(output_path).parent
+        output_filename = Path(output_path).name
+        tex_file_path = output_dir / f"{output_filename}.tex"
+        pdf_file_path = output_dir / f"{output_filename}.pdf"
         
-        text = response['tailored_resume']
-        if not text or not text.strip():
-            raise TailorPipelineError("AI generated empty resume")
-        
-        return text.strip()
-    
-    def _save_output(self, content: str, original_data: Dict, job_desc: str, 
+        try:
+            with open(tex_file_path, 'w', encoding='utf-8') as f:
+                f.write(latex_code)
+            
+            for _ in range(2):
+                subprocess.run(
+                    ['pdflatex', '-interaction=nonstopmode', '-output-directory', str(output_dir), str(tex_file_path)],
+                    check=True, capture_output=True, timeout=120
+                )
+            return str(pdf_file_path)
+        except Exception as e:
+            self.logger.error(f"Direct PDF compilation failed: {e}")
+            return ""
+
+    def _save_output(self, content: Dict, original_data: Dict, job_desc: str, 
                     output_format: str, result_dir: Path) -> Path:
-        """
-        Save tailored resume to file in specified format.
-        
-        Args:
-            content (str): Tailored resume text
-            original_data (Dict): Original parsed resume data
-            job_desc (str): Job description text
-            output_format (str): Desired output format
-            result_dir (Path): Directory to save results
-            
-        Returns:
-            Path: Path to the primary output file
-        """
+        """Save tailored resume in specified format."""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         source_name = Path(original_data.get('source_path', 'resume')).stem
         
         if output_format == "docx":
             output_path = result_dir / f"{source_name}_tailored_{timestamp}.docx"
-            self._save_as_docx(content, output_path)
+            txt_content = self._flatten_structured_resume(content)
+            self._save_as_docx(txt_content, output_path)
             return output_path
             
         elif output_format == "json":
             output_path = result_dir / f"{source_name}_tailored_{timestamp}.json"
-            data = {
-                'tailored_resume': content, 
-                'timestamp': timestamp,
-                'candidate_name': original_data.get('name')
-            }
-            output_path.write_text(json.dumps(data, indent=2), encoding='utf-8')
+            output_path.write_text(json.dumps(content, indent=2), encoding='utf-8')
             return output_path
             
         elif output_format == 'latex':
-            latex_code = self.generator.generate_latex(content, name=original_data.get('name'))
+            latex_code = self.generator.generate_from_structure(content)
             output_path = result_dir / f"{source_name}_tailored_{timestamp}.tex"
             output_path.write_text(latex_code, encoding='utf-8')
             return output_path
             
         elif output_format == "latex-pdf":
             output_path_base = result_dir / f"{source_name}_tailored_{timestamp}"
-            pdf_path = self.generator.generate_pdf(content, str(output_path_base), name=original_data.get('name'))
+            latex_code = self.generator.generate_from_structure(content)
+            pdf_path = self._compile_pdf(latex_code, str(output_path_base))
             if pdf_path:
                 return Path(pdf_path)
             return output_path_base.with_suffix('.tex')
             
         else:  # Default to txt
+            txt_content = self._flatten_structured_resume(content)
             output_path = result_dir / f"{source_name}_tailored_{timestamp}.txt"
-            output_path.write_text(content, encoding='utf-8')
+            output_path.write_text(txt_content, encoding='utf-8')
             return output_path
-    
+
     def _save_as_docx(self, content: str, output_path: Path) -> None:
-        """
-        Save resume content as a DOCX file with professional formatting.
-        
-        Args:
-            content (str): Resume text
-            output_path (Path): Output file path
-        """
+        """Save resume content as DOCX."""
         try:
             from docx import Document
-            from docx.shared import Pt, RGBColor, Inches
-            from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
+            from docx.shared import Pt, Inches
         except ImportError:
             self.logger.warning("python-docx not installed, saving as TXT instead")
             output_path.with_suffix('.txt').write_text(content, encoding='utf-8')
             return
         
         doc = Document()
-        
-        # Set margins
-        sections = doc.sections
-        for section in sections:
+        for section in doc.sections:
             section.top_margin = Inches(0.5)
             section.bottom_margin = Inches(0.5)
             section.left_margin = Inches(0.75)
             section.right_margin = Inches(0.75)
         
-        # Parse resume into sections
-        lines = content.split('\n')
-        current_section = None
-        
-        for line in lines:
+        for line in content.split('\n'):
             line_stripped = line.strip()
+            if not line_stripped: continue
             
-            if not line_stripped:
-                continue
-            
-            # Detect section headers (usually ALL CAPS or followed by dashes)
-            if (line_stripped.isupper() and 
-                len(line_stripped) < 40 and 
-                not line_stripped.startswith('•')):
-                # Add section heading
-                heading = doc.add_heading(line_stripped, level=1)
-                heading_format = heading.paragraph_format
-                heading_format.space_before = Pt(6)
-                heading_format.space_after = Pt(3)
-                current_section = line_stripped
-            
+            if (line_stripped.isupper() and len(line_stripped) < 40):
+                doc.add_heading(line_stripped, level=1)
             elif line_stripped.startswith('•'):
-                # Add bullet point (remove bullet and add as list)
-                text = line_stripped[1:].strip()
-                para = doc.add_paragraph(text, style='List Bullet')
-                para.paragraph_format.space_after = Pt(2)
-            
+                doc.add_paragraph(line_stripped[1:].strip(), style='List Bullet')
             else:
-                # Regular paragraph
-                if line_stripped:
-                    para = doc.add_paragraph(line_stripped)
-                    para.paragraph_format.space_after = Pt(2)
+                doc.add_paragraph(line_stripped)
         
         doc.save(str(output_path))
-        self.logger.info(f"DOCX document saved to: {output_path}")
-    
-    
-    def batch_tailor(self, resume_path: str, job_files_directory: str,
-                    output_format: str = "txt") -> Dict[str, any]:
-        """
-        Tailor a single resume against multiple job descriptions.
-        
-        Useful for applying to multiple positions.
-        
-        Args:
-            resume_path (str): Path to resume file
-            job_files_directory (str): Directory containing job description files
-            output_format (str): Output format
-            
-        Returns:
-            Dict with results for each job
-        """
-        jobs_dir = Path(job_files_directory)
-        
-        if not jobs_dir.exists() or not jobs_dir.is_dir():
-            raise TailorPipelineError(f"Jobs directory not found: {job_files_directory}")
-        
-        job_files = list(jobs_dir.glob("*.txt")) + list(jobs_dir.glob("*.md"))
-        
-        if not job_files:
-            raise TailorPipelineError(f"No job files found in {job_files_directory}")
-        
-        self.logger.info(f"Batch tailoring: {len(job_files)} jobs")
-        
-        results = {
-            'total_jobs': len(job_files),
-            'successful': 0,
-            'failed': 0,
-            'average_ats_improvement': 0,
-            'tailored_resumes': {},
-            'errors': {}
-        }
-        
-        total_improvement = 0
-        
-        for job_file in job_files:
-            try:
-                self.logger.info(f"Processing: {job_file.name}")
-                result = self.tailor(resume_path, str(job_file), output_format)
-                
-                results['tailored_resumes'][job_file.stem] = result
-                results['successful'] += 1
-                total_improvement += result['ats_improvement']
-                
-            except Exception as e:
-                self.logger.error(f"Failed to tailor for {job_file.name}: {str(e)}")
-                results['failed'] += 1
-                results['errors'][job_file.name] = str(e)
-        
-        if results['successful'] > 0:
-            results['average_ats_improvement'] = round(
-                total_improvement / results['successful'], 1
-            )
-        
-        self.logger.info(f"Batch complete: {results['successful']} successful, {results['failed']} failed")
-        return results
 
 
 class PipelineConfig:
@@ -494,8 +381,6 @@ class PipelineConfig:
             cls.REPORTS_DIR,
             cls.LOGS_DIR,
         ]
-        
         for directory in directories:
             Path(directory).mkdir(parents=True, exist_ok=True)
-        
         logger.info("Pipeline directories initialized")
