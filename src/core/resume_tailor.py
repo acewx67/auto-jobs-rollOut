@@ -290,9 +290,16 @@ class TailorPipeline:
                 )
             
             if pdf_file_path.exists():
+                # Clean up auxiliary files
+                for ext in ['.aux', '.log', '.out']:
+                    aux_file = output_dir / f"{output_filename}{ext}"
+                    if aux_file.exists():
+                        aux_file.unlink()
                 return str(pdf_file_path)
             
             self.logger.error("pdflatex finished but no PDF was created")
+            # Even if it failed, try to clean up the tex, aux, log files if we want a clean stay
+            # But we'll keep the .tex for debugging if the PDF failed.
             return ""
         except Exception as e:
             self.logger.error(f"Direct PDF compilation failed: {e}")

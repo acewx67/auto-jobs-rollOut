@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 from datetime import datetime
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends, BackgroundTasks
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -212,9 +212,9 @@ async def status():
     }
 
 @app.get("/api/download/{filename}")
-async def download_file(filename: str):
+async def download_file(filename: str, background_tasks: BackgroundTasks):
     """
-    Download a generated file with correct MIME type.
+    Download a generated file with correct MIME type and cleanup after.
     """
     file_path = Path(PipelineConfig.OUTPUT_RESUME_DIR) / filename
     if not file_path.exists():
@@ -230,6 +230,21 @@ async def download_file(filename: str):
         '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
     }
     media_type = content_types.get(extension, 'application/octet-stream')
+    
+    # Schedule cleanup in background
+    def cleanup_file(path: Path):
+        try:
+            if path.exists():
+                path.unlink()
+                # Also try cleaning up related .tex file if this is a .pdf
+                if path.suffix == '.pdf':
+                    tex_file = path.with_suffix('.tex')
+                    if tex_file.exists():
+                        tex_file.unlink()
+        except OSError:
+            pass
+            
+    background_tasks.add_task(cleanup_file, file_path)
     
     return FileResponse(
         path=file_path,
