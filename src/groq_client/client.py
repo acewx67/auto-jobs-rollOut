@@ -63,7 +63,9 @@ When tailoring resumes:
 - Highlight relevant achievements and responsibilities
 - Add missing keywords naturally without fabrication
 - Improve bullet point clarity and impact
-- Maintain chronological integrity"""
+- Maintain chronological integrity
+
+IMPORTANT: Return the data as a SINGLE valid JSON object. Escaped characters like backslashes in LaTeX content MUST be properly handled (double-escaped as \\\\ if necessary in the JSON string)."""
     
     def __init__(self, api_key: Optional[str] = None):
         """
@@ -175,6 +177,12 @@ IMPORTANT RULES:
 4. Keep the same companies, positions, dates, and achievements
 5. Improve clarity and ATS compatibility
 
+FORMATTING RULES FOR OUTPUT:
+- Use **bold format** (with double asterisks) to emphasize: company names, key technologies, and important achievements
+- Example: **Google** - **Senior Python Engineer**
+- Example: Built using **FastAPI**, **Docker**, and **Kubernetes**
+- This bold formatting will be converted to proper LaTeX formatting automatically
+
 Original Resume:
 {original_resume}
 
@@ -183,14 +191,14 @@ Target Job Description:
 {analysis_str}
 
 Produce a JSON response with:
-- tailored_resume: The full tailored resume (preserve all sections, reorder/reframe content)
+- tailored_resume: The full tailored resume (preserve all sections, reorder/reframe content, use **bold** for emphasis)
 - summary_section: A new professional summary optimized for this role
 - key_changes: List of 3-5 specific changes made (descriptions of what was reorganized/reframed)
 - keyword_usage: 5-10 job keywords that are now present in tailored resume
 
 Keep the resume truthful and defensible. Return ONLY valid JSON."""
 
-        response = self._call_api(prompt, temperature=0.7, max_tokens=2048)
+        response = self._call_api(prompt, temperature=0.7, max_tokens=4096)
         
         try:
             result = json.loads(response)
@@ -198,6 +206,8 @@ Keep the resume truthful and defensible. Return ONLY valid JSON."""
             return result
         except json.JSONDecodeError as e:
             self.logger.error(f"Failed to parse tailored resume response: {e}")
+            self.logger.debug(f"Response (first 500 chars): {response[:500]}")
+            self.logger.debug(f"Response (last 500 chars): {response[-500:]}")
             raise GroqClientError(f"Invalid JSON response from API: {str(e)}")
     
     def generate_professional_summary(self, resume_text: str, job_description: str) -> str:

@@ -183,7 +183,7 @@ class LatexResumeGenerator:
         Convert plain text resume to LaTeX.
         
         Args:
-            resume_text (str): Plain text resume content
+            resume_text (str): Plain text resume content (may contain markdown bold **text**)
             
         Returns:
             str: LaTeX document code
@@ -192,7 +192,7 @@ class LatexResumeGenerator:
             LatexGeneratorError: If generation fails
         """
         try:
-            # Parse resume sections
+            # Parse resume sections FIRST (while still in markdown format)
             sections = self._parse_resume_sections(resume_text)
             
             # Extract name from resume text (usually first line)
@@ -232,10 +232,12 @@ class LatexResumeGenerator:
             # Skip section headers and short lines
             if (not line.isupper() and 
                 len(line) < 50 and
-                not any(keyword in line.lower() for keyword in ['skill', 'experience', 'education', 'project'])):
+                not any(keyword in line.lower() for keyword in ['skill', 'experience', 'education', 'project', 'summary'])):
                 # Check if it looks like a name (contains letters, not emails, no special chars)
                 if not any(c in line for c in ['@', '+', '/', '\\']) and len(line.split()) <= 4:
-                    return line
+                    # Strip markdown bold if present
+                    name = re.sub(r'\*\*(.+?)\*\*', r'\1', line)
+                    return name
         
         return "Your Name"
     
@@ -270,9 +272,12 @@ class LatexResumeGenerator:
                 continue
             
             # Check if line is a section header
+            # First, remove markdown formatting for pattern matching
+            line_for_matching = re.sub(r'\*\*(.*?)\*\*', r'\1', line_stripped)
+            
             section_found = False
             for section_key, pattern in self.SECTION_PATTERNS.items():
-                if re.match(pattern, line_stripped.lower()):
+                if re.match(pattern, line_for_matching.lower()):
                     current_section = section_key
                     section_found = True
                     break
@@ -317,21 +322,21 @@ class LatexResumeGenerator:
                 phone = line
         
         heading = r"\begin{center}" + "\n"
-        heading += f"    \\textbf{{\\Huge \\scshape {self._escape_latex(name)}}} \\\\ \\vspace{{1pt}}\n"
+        heading += f"    {{\\Huge \\textbf{{{self._escape_latex(name, preserve_markup=False)}}}}} \\\\ \\vspace{{1pt}}\n"
         
         # Build contact line
         contact_parts = []
         if phone:
-            contact_parts.append(self._escape_latex(phone))
+            contact_parts.append(self._escape_latex(phone, preserve_markup=False))
         if email:
             email_clean = email.strip('<>')
-            contact_parts.append(f"\\href{{mailto:{email_clean}}}{{\\underline{{{self._escape_latex(email_clean)}}}}}")
+            contact_parts.append(f"\\href{{mailto:{email_clean}}}{{\\underline{{{self._escape_latex(email_clean, preserve_markup=False)}}}}}")
         if linkedin:
             linkedin_clean = ' '.join(linkedin.split()[1:]) if ' ' in linkedin else linkedin
-            contact_parts.append(f"\\href{{https://linkedin.com/in/{linkedin_clean}}}{{\\underline{{linkedin.com/in/{self._escape_latex(linkedin_clean)}}}}}")
+            contact_parts.append(f"\\href{{https://linkedin.com/in/{linkedin_clean}}}{{\\underline{{linkedin.com/in/{self._escape_latex(linkedin_clean, preserve_markup=False)}}}}}")
         if github:
             github_clean = ' '.join(github.split()[1:]) if ' ' in github else github
-            contact_parts.append(f"\\href{{https://github.com/{github_clean}}}{{\\underline{{github.com/{self._escape_latex(github_clean)}}}}}")
+            contact_parts.append(f"\\href{{https://github.com/{github_clean}}}{{\\underline{{github.com/{self._escape_latex(github_clean, preserve_markup=False)}}}}}")
         
         if contact_parts:
             heading += "    \\small " + " $|$ ".join(contact_parts) + "\n"
@@ -360,6 +365,9 @@ class LatexResumeGenerator:
                 continue
             
             section_content = sections[section_name]
+            
+            # Convert markdown bold to LaTeX bold in section content
+            section_content = [self._convert_markdown_bold_to_latex(item) for item in section_content]
             
             # Generate section header
             header_name = section_name.upper()
@@ -395,7 +403,7 @@ class LatexResumeGenerator:
         skill_lines = []
         for line in content:
             if line.strip():
-                skill_lines.append(self._escape_latex(line))
+                skill_lines.append(self._escape_latex(line, preserve_markup=True))
         
         latex += " \\\\ ".join(skill_lines)
         
@@ -408,7 +416,7 @@ class LatexResumeGenerator:
         
         for line in content:
             if line.strip():
-                latex += f"    \\resumeItem{{{self._escape_latex(line)}}}\n"
+                latex += f"    \\resumeItem{{{self._escape_latex(line, preserve_markup=True)}}}\n"
         
         latex += "  \\resumeSubHeadingListEnd\n"
         return latex
@@ -477,17 +485,17 @@ class LatexResumeGenerator:
             if len(parts) >= 2:
                 title = parts[0].strip()
                 rest = ' - '.join(parts[1:])
-                latex += f"    \\resumeSubheading{{{self._escape_latex(title)}}}{{}}{{}}{{\\small {self._escape_latex(rest)}}}\n"
+                latex += f"    \\resumeSubheading{{{self._escape_latex(title, preserve_markup=True)}}}{{}}{{}}{{\\small {self._escape_latex(rest, preserve_markup=True)}}}\n"
             else:
-                latex += f"    \\resumeItem{{{self._escape_latex(first_line)}}}\n"
+                latex += f"    \\resumeItem{{{self._escape_latex(first_line, preserve_markup=True)}}}\n"
             
             # Add remaining lines as bullet points
             for line in lines[1:]:
                 if line.strip():
-                    latex += f"      \\resumeItem{{{self._escape_latex(line.strip())}}}\n"
+                    latex += f"      \\resumeItem{{{self._escape_latex(line.strip(), preserve_markup=True)}}}\n"
         else:
             # Single line - just add as item
-            latex += f"    \\resumeItem{{{self._escape_latex(text)}}}\n"
+            latex += f"    \\resumeItem{{{self._escape_latex(text, preserve_markup=True)}}}\n"
         
         return latex
     
@@ -497,10 +505,10 @@ class LatexResumeGenerator:
             return ""
         
         content = ' '.join([l.strip() for l in main_lines])
-        latex = f"    \\resumeSubheading{{}}{{}}{{}}{{\\small {self._escape_latex(content)}}}\n"
+        latex = f"    \\resumeSubheading{{}}{{}}{{}}{{\\small {self._escape_latex(content, preserve_markup=True)}}}\n"
         
         for subitem in subitems:
-            latex += f"      \\resumeItem{{{self._escape_latex(subitem)}}}\n"
+            latex += f"      \\resumeItem{{{self._escape_latex(subitem, preserve_markup=True)}}}\n"
         
         return latex
     
@@ -518,28 +526,49 @@ class LatexResumeGenerator:
             
             if len(parts) >= 4:
                 title, company, details, date = parts[0], parts[1], parts[2], parts[3]
-                latex = f"    \\resumeSubheading{{{self._escape_latex(title)}}}{{{self._escape_latex(date)}}}{{{self._escape_latex(details)}}}{{{self._escape_latex(company)}}}\n"
+                latex = f"    \\resumeSubheading{{{self._escape_latex(title, preserve_markup=True)}}}{{{self._escape_latex(date, preserve_markup=True)}}}{{{self._escape_latex(details, preserve_markup=True)}}}{{{self._escape_latex(company, preserve_markup=True)}}}\n"
             elif len(parts) >= 3:
                 title, company, date = parts[0], parts[1], parts[2]
-                latex = f"    \\resumeSubheading{{{self._escape_latex(title)}}}{{{self._escape_latex(date)}}}{{{self._escape_latex(company)}}}{{}} \n"
+                latex = f"    \\resumeSubheading{{{self._escape_latex(title, preserve_markup=True)}}}{{{self._escape_latex(date, preserve_markup=True)}}}{{{self._escape_latex(company, preserve_markup=True)}}}{{}} \n"
             else:
-                latex = f"    \\resumeItem{{{self._escape_latex(content)}}}\n"
+                latex = f"    \\resumeItem{{{self._escape_latex(content, preserve_markup=True)}}}\n"
         else:
-            latex = f"    \\resumeItem{{{self._escape_latex(content)}}}\n"
+            latex = f"    \\resumeItem{{{self._escape_latex(content, preserve_markup=True)}}}\n"
         
         return latex
     
     @staticmethod
-    def _escape_latex(text: str) -> str:
+    @staticmethod
+    def _escape_latex(text: str, preserve_markup: bool = True) -> str:
         """
-        Escape special LaTeX characters in text.
+        Escape special LaTeX characters in text while optionally preserving LaTeX markup.
         
         Args:
-            text (str): Plain text to escape
+            text (str): Text to escape (may contain LaTeX commands like \textbf{})
+            preserve_markup (bool): If True, preserves LaTeX commands like \textbf{}
             
         Returns:
-            str: LaTeX-safe text
+            str: LaTeX-safe text with markup preserved
         """
+        # If preserving markup, temporarily replace LaTeX commands with placeholders
+        latex_commands = []
+        processed_text = text
+        
+        if preserve_markup:
+            # Find and temporarily replace LaTeX markup like \textbf{...}
+            # Pattern: backslash + command name + braced content
+            pattern = r'\\textbf\{[^}]*\}|\\textit\{[^}]*\}|\\texttt\{[^}]*\}|\\textmd\{[^}]*\}|\\textrm\{[^}]*\}|\\underline\{[^}]*\}'
+            
+            placeholders = []
+            def replace_command(match):
+                latex_commands.append(match.group(0))
+                # Use a placeholder with only alphanumeric that won't be escaped
+                placeholder = f"XLATEXCMDX{len(latex_commands)-1}XENDX"
+                placeholders.append(placeholder)
+                return placeholder
+            
+            processed_text = re.sub(pattern, replace_command, processed_text)
+        
         # Order matters: escape backslash first
         replacements = [
             ('\\', r'\textbackslash{}'),
@@ -552,12 +581,35 @@ class LatexResumeGenerator:
             ('}', r'\}'),
             ('~', r'\textasciitilde{}'),
             ('^', r'\textasciicircum{}'),
+            ('*', r'\*'),
         ]
         
         for old, new in replacements:
-            text = text.replace(old, new)
+            processed_text = processed_text.replace(old, new)
         
-        return text
+        # Restore LaTeX commands if they were preserved
+        if preserve_markup:
+            for i, cmd in enumerate(latex_commands):
+                placeholder = f"XLATEXCMDX{i}XENDX"
+                processed_text = processed_text.replace(placeholder, cmd)
+        
+        return processed_text
+    
+    @staticmethod
+    def _convert_markdown_bold_to_latex(text: str) -> str:
+        """
+        Convert markdown bold (**text**) to LaTeX bold (\textbf{text}).
+        
+        Args:
+            text (str): Text containing markdown bold formatting
+            
+        Returns:
+            str: Text with markdown bold converted to LaTeX bold
+        """
+        # Replace **text** with \textbf{text}
+        pattern = r'\*\*(.+?)\*\*'
+        converted = re.sub(pattern, r'\\textbf{\1}', text)
+        return converted
     
     def save_to_file(self, latex_content: str, output_path: Path) -> Path:
         """
@@ -616,7 +668,7 @@ class LatexResumeGenerator:
                 return None
             
             # Find generated PDF
-            pdf_path = output_dir / tex_path.stem.replace('.tex', '') + '.pdf'
+            pdf_path = output_dir / f"{tex_path.stem}.pdf"
             if not pdf_path.exists():
                 pdf_path = output_dir / (tex_path.stem + '.pdf')
             
