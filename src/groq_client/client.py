@@ -238,42 +238,44 @@ Keep the resume truthful and defensible. Return ONLY valid JSON."""
         Returns:
             Dict containing:
                 - 'name': Candidate's full name
-                - 'email': Primary email address
-                - 'phone': Primary phone number
-                - 'linkedin': LinkedIn profile URL or handle
-                - 'github': GitHub profile URL or handle
-                - 'sections': Dict of identified sections (summary, experience, education, projects, skills)
+                - 'contact': Dict with 'email', 'phone', 'location'
+                - 'socials': Dict with 'linkedin', 'github', 'portfolio'
+                - 'experience': List of objects (company, role, location, dates, achievements)
+                - 'education': List of objects (school, degree, location, dates, details)
+                - 'projects': List of objects (title, tech_stack, description)
+                - 'skills': Dictionary of categorized skills
                 
         Raises:
             GroqClientError: If API call fails or JSON is invalid
         """
-        prompt = f"""Extract structured information from this resume text.
+        prompt = f"""Extract structured information from this resume text into a rich JSON format.
         
 Resume Text:
 {resume_text}
 
 Provide a JSON response with these exact keys:
-- name: Full name (be precise, usually at the very top)
-- email: Primary email
-- phone: Best contact number
-- linkedin: LinkedIn URL/handle
-- github: GitHub URL/handle
-- sections: A dictionary where keys are section names (summary, experience, education, projects, skills) and values are the full content of those sections (preserve bullet points and formatting).
+- name: Full name (precise, from the top)
+- contact: {{email: "", phone: "", location: ""}}
+- socials: {{linkedin: "", github: "", portfolio: ""}}
+- experience: List of objects, each with: company, role, location, dates, achievements (list of strings)
+- education: List of objects, each with: school, degree, location, dates, details (string)
+- projects: List of objects, each with: title, tech_stack (e.g. "Python, Docker"), description (list of strings)
+- skills: Dictionary where keys are categories (e.g. "Languages", "Tools") and values are lists of skills.
 
 IMPORTANT:
-1. If a piece of information is missing, use an empty string ""
-2. For the 'sections', capture the full text of each section precisely.
+1. DISTINGUISH PERSONAL PROJECTS: Only put actual companies/jobs in 'experience'. Put personal or academic projects in 'projects'.
+2. If a piece of information is missing, use an empty string "" or an empty list [].
 3. Return ONLY valid JSON, no additional text."""
 
-        response = self._call_api(prompt, temperature=0.2, max_tokens=3000)
+        response = self._call_api(prompt, temperature=0.1, max_tokens=3000)
         
         try:
             result = json.loads(response)
-            self.logger.info("Successfully parsed resume structure with AI")
+            self.logger.info("Successfully parsed resume into rich structure with AI")
             return result
         except json.JSONDecodeError as e:
-            self.logger.error(f"Failed to parse AI resume parsing response: {e}")
-            raise GroqClientError(f"Invalid JSON response from AI parser: {str(e)}")
+            self.logger.error(f"Failed to parse AI rich resume parsing response: {e}")
+            raise GroqClientError(f"Invalid JSON response from AI rich parser: {str(e)}")
 
     def generate_professional_summary(self, resume_text: str, job_description: str) -> str:
         """
