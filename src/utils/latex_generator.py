@@ -349,6 +349,192 @@ class LatexResumeGenerator:
                 return line
         
         return ""
+
+    def generate_from_structure(self, data: Dict[str, any]) -> str:
+        """
+        Generate LaTeX from a rich structured JSON data.
+        
+        Args:
+            data (Dict): Structured resume data (as returned by GroqClient.parse_resume)
+            
+        Returns:
+            str: LaTeX document code
+        """
+        try:
+            # 1. Generate Heading
+            heading_latex = self._generate_structured_heading(data)
+            
+            # 2. Generate Sections
+            sections_latex = ""
+            
+            # Summary
+            if data.get('summary'):
+                sections_latex += "\n%-----------SUMMARY-----------\n"
+                sections_latex += "\\section{SUMMARY}\n"
+                sections_latex += "  \\resumeSubHeadingListStart\n"
+                sections_latex += f"    \\resumeItem{{{self._escape_latex(data['summary'], preserve_markup=True)}}}\n"
+                sections_latex += "  \\resumeSubHeadingListEnd\n"
+            
+            # Technical Skills
+            if data.get('skills'):
+                sections_latex += "\n%-----------TECHNICAL SKILLS-----------\n"
+                sections_latex += "\\section{TECHNICAL SKILLS}\n"
+                sections_latex += self._format_structured_skills(data['skills'])
+            
+            # Experience
+            if data.get('experience'):
+                sections_latex += "\n%-----------EXPERIENCE-----------\n"
+                sections_latex += "\\section{EXPERIENCE}\n"
+                sections_latex += self._format_structured_experience(data['experience'])
+            
+            # Projects
+            if data.get('projects'):
+                sections_latex += "\n%-----------PROJECTS-----------\n"
+                sections_latex += "\\section{PROJECTS}\n"
+                sections_latex += self._format_structured_projects(data['projects'])
+            
+            # Education
+            if data.get('education'):
+                sections_latex += "\n%-----------EDUCATION-----------\n"
+                sections_latex += "\\section{EDUCATION}\n"
+                sections_latex += self._format_structured_education(data['education'])
+            
+            # 3. Fill template
+            latex_doc = self.LATEX_TEMPLATE.format(
+                heading=heading_latex,
+                sections=sections_latex
+            )
+            
+            return latex_doc
+            
+        except Exception as e:
+            self.logger.error(f"Error generating LaTeX from structure: {e}")
+            raise LatexGeneratorError(f"Failed to generate structured LaTeX: {str(e)}")
+
+    def _generate_structured_heading(self, data: Dict) -> str:
+        """Generate heading from structured contact/socials data"""
+        name = data.get('name', 'Your Name')
+        contact = data.get('contact', {})
+        socials = data.get('socials', {})
+        
+        email = contact.get('email', '')
+        phone = contact.get('phone', '')
+        location = contact.get('location', '')
+        
+        linkedin = socials.get('linkedin', '')
+        github = socials.get('github', '')
+        portfolio = socials.get('portfolio', '')
+        
+        heading = r"\begin{center}" + "\n"
+        heading += f"    {{\\Huge \\textbf{{{self._escape_latex(name, preserve_markup=False)}}}}} \\\\ \\vspace{{1pt}}\n"
+        
+        contact_parts = []
+        if phone: contact_parts.append(self._escape_latex(phone, preserve_markup=False))
+        if email: 
+            e = email.strip('<>').strip()
+            contact_parts.append(f"\\href{{mailto:{e}}}{{\\underline{{{self._escape_latex(e, preserve_markup=False)}}}}}")
+        if linkedin:
+            l = linkedin.split('/')[-1] if '/' in linkedin else linkedin
+            contact_parts.append(f"\\href{{https://linkedin.com/in/{l}}}{{\\underline{{linkedin.com/in/{self._escape_latex(l, preserve_markup=False)}}}}}")
+        if github:
+            g = github.split('/')[-1] if '/' in github else github
+            contact_parts.append(f"\\href{{https://github.com/{g}}}{{\\underline{{github.com/{self._escape_latex(g, preserve_markup=False)}}}}}")
+        
+        if contact_parts:
+            heading += "    \\small " + " $|$ ".join(contact_parts) + "\n"
+        
+        heading += r"\end{center}"
+        return heading
+
+    def _format_structured_experience(self, experience: List[Dict]) -> str:
+        """Format experience section from structured list"""
+        latex = "  \\resumeSubHeadingListStart\n"
+        for entry in experience:
+            company = entry.get('company', '')
+            role = entry.get('role', '')
+            location = entry.get('location', '')
+            dates = entry.get('dates', '')
+            achievements = entry.get('achievements', [])
+            
+            # Format subheading (Role directly below company, as requested)
+            # Param 1: Company, Param 2: Location, Param 3: Role, Param 4: Dates
+            # But the requirement was "directly below", so we put Role (3) below Company (1)
+            latex += f"    \\resumeSubheading{{{self._escape_latex(company, preserve_markup=True)}}}{{{self._escape_latex(location, preserve_markup=True)}}}{{{self._escape_latex(role, preserve_markup=True)}}}{{{self._escape_latex(dates, preserve_markup=True)}}}\n"
+            
+            latex += "      \\resumeItemListStart\n"
+            for ach in achievements:
+                if ach.strip():
+                    latex += f"        \\resumeItem{{{self._escape_latex(ach, preserve_markup=True)}}}\n"
+            latex += "      \\resumeItemListEnd\n"
+            latex += "    \\vspace{5pt}\n"
+            
+        latex += "  \\resumeSubHeadingListEnd\n"
+        return latex
+
+    def _format_structured_education(self, education: List[Dict]) -> str:
+        """Format education section from structured list"""
+        latex = "  \\resumeSubHeadingListStart\n"
+        for entry in education:
+            school = entry.get('school', '')
+            degree = entry.get('degree', '')
+            location = entry.get('location', '')
+            dates = entry.get('dates', '')
+            details = entry.get('details', '')
+            
+            latex += f"    \\resumeSubheading{{{self._escape_latex(school, preserve_markup=True)}}}{{{self._escape_latex(location, preserve_markup=True)}}}{{{self._escape_latex(degree, preserve_markup=True)}}}{{{self._escape_latex(dates, preserve_markup=True)}}}\n"
+            if details:
+                latex += "      \\resumeItemListStart\n"
+                latex += f"        \\resumeItem{{{self._escape_latex(details, preserve_markup=True)}}}\n"
+                latex += "      \\resumeItemListEnd\n"
+            latex += "    \\vspace{5pt}\n"
+            
+        latex += "  \\resumeSubHeadingListEnd\n"
+        return latex
+
+    def _format_structured_projects(self, projects: List[Dict]) -> str:
+        """Format projects section from structured list"""
+        latex = "  \\resumeSubHeadingListStart\n"
+        for project in projects:
+            title = project.get('title', '')
+            tech = project.get('tech_stack', '')
+            description = project.get('description', [])
+            
+            if title:
+                header = f"\\textbf{{{self._escape_latex(title, preserve_markup=True)}}}"
+                if tech:
+                    header += f" $|$ \\emph{{{self._escape_latex(tech, preserve_markup=True)}}}"
+                
+                latex += f"    \\resumeProjectHeading{{{header}}}{{}}\n"
+                latex += "      \\resumeItemListStart\n"
+                for desc in description:
+                    if desc.strip():
+                        latex += f"        \\resumeItem{{{self._escape_latex(desc, preserve_markup=True)}}}\n"
+                latex += "      \\resumeItemListEnd\n"
+                latex += "    \\vspace{5pt}\n"
+                
+        latex += "  \\resumeSubHeadingListEnd\n"
+        return latex
+
+    def _format_structured_skills(self, skills: Dict) -> str:
+        """Format technical skills from structured dictionary"""
+        latex = " \\begin{itemize}[leftmargin=0.15in, label={}]\n"
+        latex += "    \\small{\\item{\n"
+        
+        skill_lines = []
+        # Sort categories to keep order consistent
+        for category in sorted(skills.keys()):
+            items = skills[category]
+            if items:
+                skill_line = f"\\textbf{{{self._escape_latex(category, preserve_markup=True)}}}: "
+                if isinstance(items, list):
+                    skill_line += ", ".join([self._escape_latex(i, preserve_markup=True) for i in items])
+                else:
+                    skill_line += self._escape_latex(str(items), preserve_markup=True)
+                skill_lines.append(skill_line)
+        
+        latex += " \\\\ ".join(skill_lines)
+        latex += "\n    }}\n \\end{itemize}\n"
+        return latex
     
     def _parse_resume_sections(self, text: str) -> Dict[str, List[str]]:
         """
@@ -514,6 +700,12 @@ class LatexResumeGenerator:
             
             section_content = sections[section_name]
             
+            # Convert markdown bold to LaTeX bold in section content
+            if isinstance(section_content, list):
+                section_content = [self._convert_markdown_bold_to_latex(item) for item in section_content]
+            else:
+                section_content = self._convert_markdown_bold_to_latex(section_content)
+            
             # If after normalization it's still empty, skip entirely
             if not any(item.strip() for item in section_content):
                 continue
@@ -644,7 +836,8 @@ class LatexResumeGenerator:
             if len(parts) >= 2:
                 title = parts[0].strip()
                 rest = ' - '.join(parts[1:])
-                latex += f"    \\resumeSubheading{{{self._escape_latex(title, preserve_markup=True)}}}{{}}{{}}{{\\small {self._escape_latex(rest, preserve_markup=True)}}}\n"
+                # Put the rest (role/location/dates) on the left side (parameter 3)
+                latex += f"    \\resumeSubheading{{{self._escape_latex(title, preserve_markup=True)}}}{{}}{{\\small {self._escape_latex(rest, preserve_markup=True)}}}{{}}\n"
             else:
                 latex += f"    \\resumeItem{{{self._escape_latex(first_line, preserve_markup=True)}}}\n"
             
