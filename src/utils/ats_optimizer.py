@@ -55,49 +55,58 @@ class ATSOptimizer:
         """Initialize the ATS optimizer"""
         self.logger = logging.getLogger(__name__)
     
-    def extract_keywords(self, job_description: str, top_n: int = 30) -> Dict[str, int]:
+    def extract_keywords(self, job_description: str, top_n: int = 20) -> Dict[str, int]:
         """
         Extract and rank keywords from job description.
         
         Prioritizes:
-        - Technical skills
-        - Industry terms
-        - Action verbs
-        - Specific tools/frameworks
+        - Technical skills (frameworks, languages, tools)
+        - High-frequency important terms
+        - Industry/role-specific keywords
         
         Args:
             job_description (str): Full job description text
-            top_n (int): Number of top keywords to return
+            top_n (int): Number of top keywords to return (reduced to 20 for better quality)
             
         Returns:
             Dict[keyword, frequency]: Keywords ranked by frequency
         """
         text = job_description.lower()
         
-        # Remove common stop words
+        # Expanded stop words list
         stop_words = {
             'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
             'of', 'with', 'by', 'from', 'up', 'about', 'into', 'through', 'is',
             'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had',
             'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might',
-            'can', 'we', 'you', 'he', 'she', 'it', 'they', 'this', 'that'
+            'can', 'we', 'you', 'he', 'she', 'it', 'they', 'this', 'that', 'as',
+            'your', 'our', 'which', 'who', 'what', 'where', 'when', 'why', 'how',
+            'looking', 'seeking', 'find', 'ideal', 'strong', 'must', 'preferred'
         }
         
-        # Extract words (2+ characters)
-        words = re.findall(r'\b[a-z]{2,}\b', text)
+        # Extract words (3+ characters for better quality)
+        words = re.findall(r'\b[a-z]{3,}\b', text)
         
         # Filter out stop words
         keywords = [w for w in words if w not in stop_words]
         
-        # Look for technical terms (capitalized in original or common tech terms)
+        # Look for technical terms (capitalized in original)
         tech_pattern = r'\b[A-Z][a-z]+([\s+][A-Z][a-z]+)*\b'
         tech_terms = re.findall(tech_pattern, job_description)
-        keywords.extend([t.lower() for t in tech_terms])
+        keywords.extend([t.lower().strip() for t in tech_terms if len(t) > 2])
+        
+        # Boost multi-word technical terms (e.g., "machine learning", "cloud computing")
+        multiword_pattern = r'\b([a-z]+\s+){1,2}[a-z]+\b'
+        multiwords = re.findall(multiword_pattern, text)
+        for mw in multiwords:
+            mw_clean = mw.strip()
+            if mw_clean and len(mw_clean) > 5 and mw_clean not in stop_words:
+                keywords.extend([mw_clean] * 2)  # Boost importance
         
         # Count frequencies
         keyword_freq = Counter(keywords)
         
-        # Return top N keywords
+        # Return top N keywords (reduced from 30 to 20 for better quality)
         top_keywords = dict(keyword_freq.most_common(top_n))
         
         self.logger.debug(f"Extracted {len(top_keywords)} keywords from job description")
@@ -174,29 +183,42 @@ class ATSOptimizer:
         """
         Score keyword matching between resume and job description.
         
+        Uses weighted scoring: priority given to high-frequency job keywords.
         Returns score (0-100), matched keywords, and missing keywords.
         """
         resume_lower = resume_text.lower()
         matched_keywords = []
         missing_keywords = []
         
+        total_weight = 0
+        matched_weight = 0
+        
         for keyword, freq in job_keywords.items():
-            # Case-insensitive keyword search with word boundaries
+            total_weight += freq
+            
+            # Try exact match first
             pattern = r'\b' + re.escape(keyword) + r'\b'
             if re.search(pattern, resume_lower):
                 matched_keywords.append(keyword)
+                matched_weight += freq
             else:
                 missing_keywords.append((keyword, freq))
         
-        # Calculate score based on match percentage
-        match_percentage = len(matched_keywords) / len(job_keywords) if job_keywords else 0
-        score = match_percentage * 100
+        # Score based on weighted match (higher frequency keywords matter more)
+        if total_weight > 0:
+            score = (matched_weight / total_weight) * 100
+        else:
+            score = 0
         
-        # Bonus for high-frequency missing keywords
+        # Apply minimum floor: if core keywords are matched, give baseline score
+        if len(matched_keywords) >= len(job_keywords) * 0.4:  # At least 40% of keywords
+            score = max(score, 70)  # Baseline credit for having core keywords
+        
+        # Sort by frequency
         missing_keywords.sort(key=lambda x: x[1], reverse=True)
         missing_keywords = [kw[0] for kw in missing_keywords[:10]]  # Top 10 missing
         
-        self.logger.debug(f"Keyword match: {len(matched_keywords)}/{len(job_keywords)}")
+        self.logger.debug(f"Keyword match: {len(matched_keywords)}/{len(job_keywords)} (weighted score: {score:.0f})")
         return score, matched_keywords, missing_keywords
     
     def _score_formatting(self, resume_text: str) -> float:
@@ -246,21 +268,25 @@ class ATSOptimizer:
         - Education
         - Skills
         """
-        score = 0.0
+        if not sections or not isinstance(sections, dict):
+            return 50.0  # Baseline if no sections provided
+        
+        score = 60.0  # Base score (more generous)
         required_sections = {'contact', 'summary', 'experience', 'education', 'skills'}
         
-        found_sections = set(sections.keys())
+        found_sections = set(s for s in sections.keys() if sections[s])
         matched_sections = found_sections.intersection(required_sections)
         
-        # Base score for each section found
-        score = (len(matched_sections) / len(required_sections)) * 100
+        # Award points per section found
+        points_per_section = 8  # 5 sections * 8 = 40 points max
+        score += len(matched_sections) * points_per_section
         
-        # Bonus for additional sections
+        # Bonus for additional sections (projects, certifications, etc.)
         additional = len(found_sections) - len(matched_sections)
         if additional > 0:
-            score += min(10, additional * 2)
+            score += min(5, additional)
         
-        self.logger.debug(f"Content completeness: {len(matched_sections)}/{len(required_sections)} sections")
+        self.logger.debug(f"Content completeness: {len(matched_sections)}/{len(required_sections)} sections found")
         return min(score, 100)
     
     def _score_readability(self, resume_text: str) -> float:

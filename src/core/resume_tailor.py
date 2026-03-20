@@ -121,7 +121,8 @@ class TailorPipeline:
             self.logger.info("Step 3/6: Calculating initial ATS score...")
             initial_ats = self.optimizer.calculate_ats_score(
                 self._flatten_structured_resume(parsed_resume),
-                job_desc
+                job_desc,
+                parsed_resume  # Pass sections for content scoring
             )
             
             # Step 4: Analyze job with Groq
@@ -162,7 +163,7 @@ class TailorPipeline:
             
             # Step 6: Calculate final ATS score
             self.logger.info("Step 6/6: Calculating final ATS score...")
-            final_ats = self.optimizer.calculate_ats_score(tailored_text, job_desc)
+            final_ats = self.optimizer.calculate_ats_score(tailored_text, job_desc, tailored_response)  # Pass sections for content scoring
             
             # Calculate improvement
             improvement = final_ats['overall_score'] - initial_ats['overall_score']
@@ -247,27 +248,66 @@ class TailorPipeline:
         """Convert structured resume back to plain text for ATS scoring"""
         text = [f"{data.get('name', '')}\n"]
         
+        # Contact information (important for ATS)
+        contact_parts = []
+        contact = data.get('contact', {})
+        if isinstance(contact, dict):
+            if contact.get('email'):
+                contact_parts.append(contact['email'])
+            if contact.get('phone'):
+                contact_parts.append(contact['phone'])
+            if contact.get('location'):
+                contact_parts.append(contact['location'])
+        if contact_parts:
+            text.append(f"CONTACT\n{' | '.join(contact_parts)}\n")
+        
+        # Summary
         if data.get('summary'):
             text.append(f"SUMMARY\n{data['summary']}\n")
+        
+        # Technical Skills (usually first for ATS emphasis)
+        if data.get('skills'):
+            text.append("TECHNICAL SKILLS")
+            for cat, items in data['skills'].items():
+                text.append(f"{cat}: {', '.join(items) if isinstance(items, list) else items}")
+            text.append("")
             
+        # Experience
         if data.get('experience'):
             text.append("EXPERIENCE")
             for exp in data['experience']:
                 text.append(f"{exp.get('company', '')} - {exp.get('role', '')}")
                 text.append('\n'.join(exp.get('achievements', [])))
             text.append("")
+        
+        # Education (CRITICAL - was missing)
+        if data.get('education'):
+            text.append("EDUCATION")
+            for edu in data['education']:
+                school = edu.get('school', '')
+                degree = edu.get('degree', '')
+                dates = edu.get('dates', '')
+                location = edu.get('location', '')
+                details = edu.get('details', '')
                 
+                edu_line = school
+                if degree:
+                    edu_line += f" - {degree}"
+                if dates:
+                    edu_line += f" ({dates})"
+                text.append(edu_line)
+                if location:
+                    text.append(f"Location: {location}")
+                if details:
+                    text.append(details)
+            text.append("")
+                
+        # Projects
         if data.get('projects'):
             text.append("PROJECTS")
             for proj in data['projects']:
                 text.append(f"{proj.get('title', '')} ({proj.get('tech_stack', '')})")
                 text.append('\n'.join(proj.get('description', [])))
-            text.append("")
-                
-        if data.get('skills'):
-            text.append("TECHNICAL SKILLS")
-            for cat, items in data['skills'].items():
-                text.append(f"{cat}: {', '.join(items) if isinstance(items, list) else items}")
             text.append("")
             
         return '\n'.join(text)
