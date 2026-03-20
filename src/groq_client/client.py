@@ -47,9 +47,9 @@ Your role is to analyze job descriptions and tailor resumes to MAXIMIZE ATS pass
 Core Principles:
 1. **Aggressive Reframing**: Interpret and present existing experience in the most favorable light to match job requirements
 2. **Inferential Skill Mapping**: If candidate has adjacent skills/experience, present them as covering job requirements
-   - Example: "Backend API development" → can claim "microservices architecture"
-   - Example: "Data analysis in Python" → can claim "Python data engineering"
-   - Example: "Team collaboration" → can claim "leadership" where appropriate
+   - Example: "Backend API development" can claim "microservices architecture"
+   - Example: "Data analysis in Python" can claim "Python data engineering"
+   - Example: "Team collaboration" can claim "leadership" where appropriate
 3. **Strategic Positioning**: Emphasize relevant aspects of existing work, bridge gaps creatively
 4. **Keyword Saturation**: Integrate ALL job description keywords/technologies naturally throughout
 5. **Achievement Reframing**: Describe existing accomplishments using job-specific language and terminology
@@ -69,7 +69,7 @@ CRITICAL RULES:
 - DO interpret ambiguous past experience charitably toward job requirements
 - DO emphasize what candidate CAN do based on similar background
 - DO present skills/experience as more broadly applicable than literally stated
-- Frame through lens: "Could this person reasonably do this job based on background?" If yes → present accordingly
+- Frame through lens: "Could this person reasonably do this job based on background?" If yes, present accordingly
 
 Your goal: Make this resume PASS ATS SYSTEMS by presenting candidate as highly aligned with every requirement.
 
@@ -182,68 +182,56 @@ Return ONLY valid JSON, no additional text."""
         if retry_feedback:
             feedback_str = f"\n\nIMPORTANT CORRECTION FROM PREVIOUS ATTEMPT:\n{retry_feedback}\nPlease ensure all requested sections are present in this new version."
         
-        prompt = f"""Your task is to AGGRESSIVELY tailor a resume for a specific job posting - maximize alignment.
+        # Sanitize job description to avoid JSON issues
+        safe_job_desc = job_description.replace('\\', '\\\\').replace('"', '\\"') if job_description else ""
+        
+        prompt = f"""Your task is to AGGRESSIVELY tailor resume for specific job posting - maximize alignment.
 
-INSTRUCTIONS:
-1. Use ALL existing experience and facts from resume - don't fabricate companies/roles/dates
-2. REFRAME EVERYTHING to match job description language/requirements
-3. If candidate has adjacent skills, present them as covering job requirements
-4. Use strategic language to show they can excel at this job
-5. Integrate job description keywords throughout naturally
-6. For each JD requirement, find closest match in background and present using JD terminology
+Use ALL existing experience and facts - don't fabricate companies/roles/dates.
+REFRAME EVERYTHING to match job description language and requirements.
 
-Original Structured Resume:
+Original Resume (structured):
 {json.dumps(original_resume, indent=2)}
 
 Target Job Description:
-{job_description}
+{safe_job_desc}
 {analysis_str}
 
-REFRAMING STRATEGY:
-- For EVERY requirement in JD, find closest match in candidate's background
-- Present that match using the EXACT job description terminology
-- Be generous with interpretation: if candidate did something similar, that counts
-- Combine/emphasize related experiences to demonstrate job fit
-- Show how their background makes them perfectly suited for THIS role
-- Example: If JD requires "microservices" and candidate did "API development", present as microservices experience
+STRATEGY:
+- For every JD requirement, find closest match in candidate background
+- Present using EXACT job description terminology  
+- Be generous: if candidate did similar, present as that requirement
+- For "microservices" JD requirement and "API development" candidate background: present as microservices experience
 
-Produce ONLY valid JSON with this exact structure:
+Return ONLY valid JSON (no markdown, no code blocks, no extra text):
+
 {{
-  "name": "Candidate name",
-  "contact": {{"email": "", "phone": "", "location": ""}},
-  "socials": {{"linkedin": "", "github": "", "portfolio": ""}},
-  "summary": "Professional summary aggressively positioned for this JD - reframe background as ideal fit (3-4 lines)",
+  "name": "string",
+  "contact": {{"email": "string", "phone": "string", "location": "string"}},
+  "socials": {{"linkedin": "string", "github": "string", "portfolio": "string"}},
+  "summary": "string - 3-4 lines reframed for this specific job",
   "experience": [
     {{
-      "company": "...",
-      "role": "...",
-      "location": "...",
-      "dates": "...",
-      "achievements": ["REFRAME using JD keywords/language", "Emphasize aspects most relevant to JD"]
+      "company": "string",
+      "role": "string",
+      "location": "string",
+      "dates": "string",
+      "achievements": ["reframed using JD language", "emphasize relevant aspects"]
     }}
   ],
   "projects": [
     {{
-      "title": "...",
-      "tech_stack": "Use JD tech terminology here",
-      "description": ["Reframe to highlight JD-relevant tech and skills"]
+      "title": "string",
+      "tech_stack": "string",
+      "description": ["string array"]
     }}
   ],
   "education": [...],
   "skills": {{"Category": ["skills using JD terminology"]}},
-  "key_changes": ["List of reframing changes made to match JD"]
+  "key_changes": ["list of changes made"]
 }}
 
-FORMATTING IN CONTENT:
-- Use **bold format** (double asterisks) for keywords matching JD
-- Example: "Developed **Python-based microservices** using **Docker and Kubernetes**"
-
-CRITICAL:
-1. Preserve original companies/roles/dates - never fabricate
-2. Aggressively reframe achievements to match JD using JD language
-3. For each JD requirement show candidate meets it through existing background
-4. If uncertain about interpretation, lean toward job-favorable interpretation
-5. Return ONLY valid JSON, no other text."""
+CRITICAL: Preserve companies/roles/dates. Reframe achievements using JD language. Return ONLY valid JSON."""
 
         response = self._call_api(prompt, temperature=0.7 if not retry_feedback else 0.8, max_tokens=4096)
         
@@ -280,24 +268,29 @@ CRITICAL:
         Raises:
             GroqClientError: If API call fails or JSON is invalid
         """
-        prompt = f"""Extract structured information from this resume text into a rich JSON format.
+        # Sanitize resume text to avoid JSON encoding issues
+        safe_resume_text = resume_text.replace('\\', '\\\\').replace('"', '\\"')
         
+        prompt = f"""Extract structured information from this resume text into valid JSON format.
+
 Resume Text:
-{resume_text}
+{safe_resume_text}
 
-Provide a JSON response with these exact keys:
-- name: Full name (precise, from the top)
-- contact: {{email: "", phone: "", location: ""}}
-- socials: {{linkedin: "", github: "", portfolio: ""}}
-- experience: List of objects, each with: company, role, location, dates, achievements (list of strings)
-- education: List of objects, each with: school, degree, location, dates, details (string)
-- projects: List of objects, each with: title, tech_stack (e.g. "Python, Docker"), description (list of strings)
-- skills: Dictionary where keys are categories (e.g. "Languages", "Tools") and values are lists of skills.
+Return ONLY a valid JSON object (no markdown, no code blocks, no extra text) with these exact keys:
+- name: string (full name)
+- contact: object with email, phone, location strings
+- socials: object with linkedin, github, portfolio strings
+- experience: array of objects (company, role, location, dates strings; achievements array)
+- education: array of objects (school, degree, location, dates strings; details string)
+- projects: array of objects (title, tech_stack strings; description array)
+- skills: object where keys are categories, values are string arrays
 
-IMPORTANT:
-1. DISTINGUISH PERSONAL PROJECTS: Only put actual companies/jobs in 'experience'. Put personal or academic projects in 'projects'.
-2. If a piece of information is missing, use an empty string "" or an empty list [].
-3. Return ONLY valid JSON, no additional text."""
+Rules:
+- Use empty string "" for missing info, empty array [] for lists
+- Distinguish company jobs (in experience) from personal projects (in projects)
+- Return ONLY valid JSON, no additional text
+- Ensure all quotes are properly escaped
+- Do not include code blocks or markdown formatting"""
 
         response = self._call_api(prompt, temperature=0.1, max_tokens=3000)
         
@@ -307,6 +300,8 @@ IMPORTANT:
             return result
         except json.JSONDecodeError as e:
             self.logger.error(f"Failed to parse AI rich resume parsing response: {e}")
+            self.logger.debug(f"Response (first 500 chars): {response[:500]}")
+            self.logger.debug(f"Response (last 500 chars): {response[-500:]}")
             raise GroqClientError(f"Invalid JSON response from AI rich parser: {str(e)}")
 
     def generate_professional_summary(self, resume_text: str, job_description: str) -> str:
